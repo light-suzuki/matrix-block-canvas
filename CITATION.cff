@@ -1,0 +1,7 @@
+cff-version: 1.2.0
+message: "If you use Matrix Block Canvas in academic work, please cite this repository."
+title: "Matrix Block Canvas"
+authors:
+  - name: "light-suzuki"
+repository-code: "https://github.com/light-suzuki/matrix-block-canvas"
+license: "MIT"
