@@ -1468,17 +1468,17 @@ const paperSimpleLight: GraphConfig = (() => {
       labelTopFontSize: 12,
       labelBottomFontSize: 11,
       ticks: [
-        { x: 0, major: true, labelTop: "M1", labelBottom: "10.9" },
-        { x: 0.1, major: true, labelTop: "M2", labelBottom: "12.5" },
-        { x: 0.2, major: true, labelTop: "M3", labelBottom: "14.2" },
-        { x: 0.3, major: true, labelTop: "M4", labelBottom: "16.0" },
-        { x: 0.4, major: true, labelTop: "M5", labelBottom: "17.8" },
-        { x: 0.5, major: true, labelTop: "M6", labelBottom: "18.5" },
-        { x: 0.6, major: true, labelTop: "M7", labelBottom: "19.1" },
-        { x: 0.7, major: true, labelTop: "M8", labelBottom: "19.5" },
-        { x: 0.8, major: true, labelTop: "M9", labelBottom: "20.0" },
-        { x: 0.9, major: true, labelTop: "M10", labelBottom: "20.4" },
-        { x: 1, major: true, labelTop: "M11", labelBottom: "21.0" },
+        { x: 0, major: true, labelTop: "M1", labelBottom: "1" },
+        { x: 0.1, major: true, labelTop: "M2", labelBottom: "2" },
+        { x: 0.2, major: true, labelTop: "M3", labelBottom: "3" },
+        { x: 0.3, major: true, labelTop: "M4", labelBottom: "4" },
+        { x: 0.4, major: true, labelTop: "M5", labelBottom: "5" },
+        { x: 0.5, major: true, labelTop: "M6", labelBottom: "6" },
+        { x: 0.6, major: true, labelTop: "M7", labelBottom: "7" },
+        { x: 0.7, major: true, labelTop: "M8", labelBottom: "8" },
+        { x: 0.8, major: true, labelTop: "M9", labelBottom: "9" },
+        { x: 0.9, major: true, labelTop: "M10", labelBottom: "10" },
+        { x: 1, major: true, labelTop: "M11", labelBottom: "11" },
       ],
     },
   };
@@ -1535,31 +1535,31 @@ const faZoomFigureLight: GraphConfig = (() => {
   const chrLen = 200;
 
   const coarseMarkers = [
-    { name: "C01", pos: 10.9 },
-    { name: "C02", pos: 20.4 },
-    { name: "C03", pos: 29.8 },
-    { name: "C04", pos: 44.2 },
-    { name: "C05", pos: 50.6 },
-    { name: "C06", pos: 58.1 },
+    { name: "C01", pos: 1 },
+    { name: "C02", pos: 4 },
+    { name: "C03", pos: 7 },
+    { name: "C04", pos: 10 },
+    { name: "C05", pos: 13 },
+    { name: "C06", pos: 16 },
   ];
   const coarseStart = coarseMarkers[0].pos;
   const coarseEnd = coarseMarkers[coarseMarkers.length - 1].pos;
 
   const markers: MarkerInfo[] = [
-    { name: "C01", pos: 10.9 },
-    { name: "C02", pos: 11.9 },
-    { name: "C03", pos: 13.8 },
-    { name: "C04", pos: 16.4 },
-    { name: "C05", pos: 16.7 },
-    { name: "C06", pos: 18.3 },
-    { name: "C07", pos: 18.4 },
-    { name: "C08", pos: 19.1 },
-    { name: "C09", pos: 19.2 },
-    { name: "C10", pos: 19.3 },
-    { name: "C11", pos: 19.4 },
-    { name: "C12", pos: 19.5 },
-    { name: "C13", pos: 19.51 },
-    { name: "C14", pos: 20.4 },
+    { name: "C01", pos: 1 },
+    { name: "C02", pos: 2 },
+    { name: "C03", pos: 3 },
+    { name: "C04", pos: 4 },
+    { name: "C05", pos: 5 },
+    { name: "C06", pos: 6 },
+    { name: "C07", pos: 7 },
+    { name: "C08", pos: 8 },
+    { name: "C09", pos: 9 },
+    { name: "C10", pos: 10 },
+    { name: "C11", pos: 11 },
+    { name: "C12", pos: 12 },
+    { name: "C13", pos: 13 },
+    { name: "C14", pos: 14 },
   ];
   const n = markers.length;
 
@@ -1739,8 +1739,8 @@ const faZoomFigureLight: GraphConfig = (() => {
     return 0.5;
   };
 
-  const arrowStart = 10.9;
-  const arrowEnd = 11.9;
+  const arrowStart = 1;
+  const arrowEnd = 2;
   const ax0 = plotX + posToX(arrowStart) * plotWidth;
   const ax1 = plotX + posToX(arrowEnd) * plotWidth;
   const arrowY = (lastData?.y ?? plotY) + (lastData?.h ?? rowHeight) + 56;

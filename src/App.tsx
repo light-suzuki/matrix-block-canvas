@@ -157,28 +157,28 @@ const DEFAULT_TAB: TabKey = "builder";
 const DEFAULT_TEMPLATE_ID = "ggt_classic_light";
 
 const EXAMPLE_TSV =
-  "sample\tc01\tc02\tc03\ngroup\t1\t1\t2\npos\t10\t20\t5\nrow_01\tA\tA\tB\nrow_02\tB\tB\tB\nrow_03\tA\tH\tB\nrow_04\tB\tA\t-\n";
+  "sample\tc01\tc02\tc03\ngroup\t1\t1\t2\npos\t1\t2\t3\nrow_01\tA\tA\tB\nrow_02\tB\tB\tB\nrow_03\tA\tH\tB\nrow_04\tB\tA\t-\n";
 
-const EXAMPLE_FJ_MAP = "# fjFile = MAP\nC01\t1\t32.5\nC02\t1\t45.0\nC03\t2\t23.9\n";
+const EXAMPLE_FJ_MAP = "# fjFile = MAP\nC01\t1\t1\nC02\t1\t2\nC03\t2\t1\n";
 
 const EXAMPLE_FJ_GENO =
   "# fjFile = GENOTYPE\n\tC01\tC02\tC03\nrow_01\tA\tG\tG\nrow_02\tT\tA\tC\nrow_03\tA\t-\tG/T\nrow_04\tT\tG\tT\n";
 
 const DEFAULT_FA_ZOOM_META: MarkerInfo[] = [
-  { name: "C01", chr: "1", pos: 10.9 },
-  { name: "C02", chr: "1", pos: 11.9 },
-  { name: "C03", chr: "1", pos: 13.8 },
-  { name: "C04", chr: "1", pos: 16.4 },
-  { name: "C05", chr: "1", pos: 16.7 },
-  { name: "C06", chr: "1", pos: 18.3 },
-  { name: "C07", chr: "1", pos: 18.4 },
-  { name: "C08", chr: "1", pos: 19.1 },
-  { name: "C09", chr: "1", pos: 19.2 },
-  { name: "C10", chr: "1", pos: 19.3 },
-  { name: "C11", chr: "1", pos: 19.4 },
-  { name: "C12", chr: "1", pos: 19.5 },
-  { name: "C13", chr: "1", pos: 19.51 },
-  { name: "C14", chr: "1", pos: 20.4 },
+  { name: "C01", chr: "1", pos: 1 },
+  { name: "C02", chr: "1", pos: 2 },
+  { name: "C03", chr: "1", pos: 3 },
+  { name: "C04", chr: "1", pos: 4 },
+  { name: "C05", chr: "1", pos: 5 },
+  { name: "C06", chr: "1", pos: 6 },
+  { name: "C07", chr: "1", pos: 7 },
+  { name: "C08", chr: "1", pos: 8 },
+  { name: "C09", chr: "1", pos: 9 },
+  { name: "C10", chr: "1", pos: 10 },
+  { name: "C11", chr: "1", pos: 11 },
+  { name: "C12", chr: "1", pos: 12 },
+  { name: "C13", chr: "1", pos: 13 },
+  { name: "C14", chr: "1", pos: 14 },
 ];
 
 const DEFAULT_FA_ZOOM_MAP_TSV =
@@ -441,7 +441,7 @@ export const App: React.FC = () => {
   });
   const [builderCoarseMarkersDraft, setBuilderCoarseMarkersDraft] = useState<string>(() =>
     readLocal("ggt_viewer_builder_coarse_markers") ||
-    "C01\t10.9\nC02\t20.4\nC03\t29.8\nC04\t44.2\nC05\t50.6\nC06\t58.1\n",
+    "C01\t1\nC02\t4\nC03\t7\nC04\t10\nC05\t13\nC06\t16\n",
   );
   const [builderZoomStages, setBuilderZoomStages] = useState<BuilderZoomStages>(() => {
     const raw = readLocal("ggt_viewer_builder_zoom_stages");
@@ -478,11 +478,11 @@ export const App: React.FC = () => {
   const [builderArrowLabelAuto, setBuilderArrowLabelAuto] = useState<boolean>(() => readLocal("ggt_viewer_builder_arrow_label_auto") === "1");
   const [builderArrowStartMb, setBuilderArrowStartMb] = useState<number>(() => {
     const n = Number(readLocal("ggt_viewer_builder_arrow_start_mb"));
-    return Number.isFinite(n) ? n : 10.9;
+    return Number.isFinite(n) ? n : 1;
   });
   const [builderArrowEndMb, setBuilderArrowEndMb] = useState<number>(() => {
     const n = Number(readLocal("ggt_viewer_builder_arrow_end_mb"));
-    return Number.isFinite(n) ? n : 11.9;
+    return Number.isFinite(n) ? n : 2;
   });
   const [builderArrowOffsetX, setBuilderArrowOffsetX] = useState<number>(() => {
     const n = Number(readLocal("ggt_viewer_builder_arrow_offset_x"));
@@ -787,7 +787,7 @@ export const App: React.FC = () => {
     if (builderDefaultPresetRef.current) return;
     builderDefaultPresetRef.current = true;
     const key = "ggt_viewer_builder_default_preset_v";
-    const want = "numeric_window_reference_v3";
+    const want = "numeric_window_reference_v4";
     const cur = readLocal(key);
     if (cur === want) return;
 
@@ -830,17 +830,17 @@ export const App: React.FC = () => {
     setBuilderAnnoCols([{ id: makeId(), header: "Value", visible: true, width: 0 }]);
     setBuilderChrLabel("Block 1");
     setBuilderChrLenMb(200);
-    setBuilderCoarseMarkersDraft("C01\t10.9\nC02\t20.4\nC03\t29.8\nC04\t44.2\nC05\t50.6\nC06\t58.1\n");
+    setBuilderCoarseMarkersDraft("C01\t1\nC02\t4\nC03\t7\nC04\t10\nC05\t13\nC06\t16\n");
     setBuilderZoomStages(2);
-    setBuilderChrZoomStartMb(10.9);
-    setBuilderChrZoomEndMb(58.1);
-    setBuilderCoarseZoomStartMb(10.9);
-    setBuilderCoarseZoomEndMb(20.4);
+    setBuilderChrZoomStartMb(1);
+    setBuilderChrZoomEndMb(16);
+    setBuilderCoarseZoomStartMb(1);
+    setBuilderCoarseZoomEndMb(4);
     setBuilderFaLabel("Window");
     setBuilderLocusLabelText("Window ~50");
     setBuilderArrowLabel("~8");
-    setBuilderArrowStartMb(10.9);
-    setBuilderArrowEndMb(11.9);
+    setBuilderArrowStartMb(1);
+    setBuilderArrowEndMb(2);
     setBuilderFigureTitle("Numeric matrix example");
     setBuilderGenoLegendA("Code A");
     setBuilderGenoLegendB("Code B");
@@ -2706,18 +2706,18 @@ export const App: React.FC = () => {
       setBuilderAnnoCols([{ id: makeId(), header: "Value", visible: true, width: 0 }]);
       setBuilderChrLabel("Block 1");
       setBuilderChrLenMb(200);
-      setBuilderCoarseMarkersDraft("C01\t10.9\nC02\t20.4\nC03\t29.8\nC04\t44.2\nC05\t50.6\nC06\t58.1\n");
+      setBuilderCoarseMarkersDraft("C01\t1\nC02\t4\nC03\t7\nC04\t10\nC05\t13\nC06\t16\n");
       setBuilderZoomStages(2);
-      setBuilderChrZoomStartMb(10.9);
-      setBuilderChrZoomEndMb(58.1);
-      setBuilderCoarseZoomStartMb(10.9);
-      setBuilderCoarseZoomEndMb(20.4);
+      setBuilderChrZoomStartMb(1);
+      setBuilderChrZoomEndMb(16);
+      setBuilderCoarseZoomStartMb(1);
+      setBuilderCoarseZoomEndMb(4);
       setBuilderFaLabel("Window");
       setBuilderLocusLabelText("Window ~50");
       setBuilderArrowLabel("~8");
       setBuilderArrowLabelAuto(false);
-      setBuilderArrowStartMb(10.9);
-      setBuilderArrowEndMb(11.9);
+      setBuilderArrowStartMb(1);
+      setBuilderArrowEndMb(2);
       setBuilderArrowOffsetX(0);
       setBuilderArrowOffsetY(0);
       setBuilderArrowLabelDx(0);
@@ -2740,20 +2740,20 @@ export const App: React.FC = () => {
 
   const loadFaZoomExample = (): void => {
     const meta: MarkerInfo[] = [
-      { name: "C01", chr: "1", pos: 10.9 },
-      { name: "C02", chr: "1", pos: 11.9 },
-      { name: "C03", chr: "1", pos: 13.8 },
-      { name: "C04", chr: "1", pos: 16.4 },
-      { name: "C05", chr: "1", pos: 16.7 },
-      { name: "C06", chr: "1", pos: 18.3 },
-      { name: "C07", chr: "1", pos: 18.4 },
-      { name: "C08", chr: "1", pos: 19.1 },
-      { name: "C09", chr: "1", pos: 19.2 },
-      { name: "C10", chr: "1", pos: 19.3 },
-      { name: "C11", chr: "1", pos: 19.4 },
-      { name: "C12", chr: "1", pos: 19.5 },
-      { name: "C13", chr: "1", pos: 19.51 },
-      { name: "C14", chr: "1", pos: 20.4 },
+      { name: "C01", chr: "1", pos: 1 },
+      { name: "C02", chr: "1", pos: 2 },
+      { name: "C03", chr: "1", pos: 3 },
+      { name: "C04", chr: "1", pos: 4 },
+      { name: "C05", chr: "1", pos: 5 },
+      { name: "C06", chr: "1", pos: 6 },
+      { name: "C07", chr: "1", pos: 7 },
+      { name: "C08", chr: "1", pos: 8 },
+      { name: "C09", chr: "1", pos: 9 },
+      { name: "C10", chr: "1", pos: 10 },
+      { name: "C11", chr: "1", pos: 11 },
+      { name: "C12", chr: "1", pos: 12 },
+      { name: "C13", chr: "1", pos: 13 },
+      { name: "C14", chr: "1", pos: 14 },
     ];
     const markers = meta.length;
     const fill = (code: BuilderCode): BuilderCode[] => Array.from({ length: markers }, () => code);
@@ -6648,8 +6648,8 @@ export const App: React.FC = () => {
                         onChange={(e) => setBuilderMapDraft(e.target.value)}
                         placeholder={
                           builderFigureMode === "fa_zoom"
-                            ? "A\t10.9\nAa\t11.9\nAb\t13.8\n...\nB\t20.4\n"
-                            : "marker\tchr\tpos\nm1\t1\t10\nm2\t1\t20\nm3\t2\t5\n"
+                            ? "C01\t1\nC02\t2\nC03\t3\n...\nC14\t14\n"
+                            : "marker\tchr\tpos\nm1\t1\t1\nm2\t1\t2\nm3\t2\t3\n"
                         }
                       />
                     </label>
@@ -6704,7 +6704,7 @@ export const App: React.FC = () => {
                           rows={6}
                           value={builderCoarseMarkersDraft}
                           onChange={(e) => setBuilderCoarseMarkersDraft(e.target.value)}
-                          placeholder={"C01\t10.9\nC02\t20.4\nC03\t29.8\nC04\t44.2\nC05\t50.6\nC06\t58.1\n"}
+                          placeholder={"C01\t1\nC02\t4\nC03\t7\nC04\t10\nC05\t13\nC06\t16\n"}
                         />
                       </label>
 	                      <details className="ggt-details" style={{ marginTop: 10 }}>
