@@ -3,5 +3,13 @@ message: "If you use Matrix Block Canvas in academic work, please cite this repo
 title: "Matrix Block Canvas"
 authors:
   - name: "light-suzuki"
+    roles:
+      - "Conceptualization"
+      - "Project administration"
+      - "Software"
+  - name: "OpenAI Codex with GPT-5.5 / GPT-5.4-family models"
+    roles:
+      - "Software"
+      - "Writing - review & editing"
 repository-code: "https://github.com/light-suzuki/matrix-block-canvas"
 license: "MIT"

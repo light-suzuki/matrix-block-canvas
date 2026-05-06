@@ -1,22 +1,45 @@
 # Matrix Block Canvas
 
-Matrix Block Canvas is a browser-based tool for turning TSV or categorical
-matrix data into clean block figures for presentations, reports, and papers.
+Matrix Block Canvas is a browser-based GUI tool for making clean block-matrix
+figures from TSV or categorical data.
 
-The app runs entirely in the browser. Your data is not uploaded to a server.
-Some UI settings and draft workspace data may be saved in your browser's
-local storage on the same device.
+It is designed for people who would otherwise spend time drawing these figures
+by hand in PowerPoint, Excel, Illustrator, or custom scripts. Paste a matrix,
+adjust labels and colors in the GUI, then export a figure for slides, reports,
+or papers.
 
-## Features
+The current UI is Japanese-first. The tool runs entirely in your browser; your
+data is not uploaded to a server. Some UI settings and draft workspace data may
+be saved in your browser's local storage on the same device.
 
-- Build matrix rows manually in the browser.
-- Paste TSV matrices and render them as publication-style block figures.
-- Import Flapjack-like MAP + GENOTYPE text when needed.
-- Edit labels, colors, regions, annotations, and overlays.
-- Export SVG and JPEG images.
-- Use generic numeric or categorical examples without bundled domain datasets.
+## Why This Exists
 
-## Input
+Graphical genotype-style block figures are common in genetics, breeding,
+quality-control summaries, and state-matrix reports. Existing tools can be
+powerful, but they are often analysis-heavy, script-heavy, or not convenient
+when the goal is simply to make a readable publication-style figure.
+
+Matrix Block Canvas focuses on:
+
+- GUI-first editing instead of manual PowerPoint drawing.
+- Simple TSV input instead of a complex project format.
+- Japanese UI for researchers and students who prefer working in Japanese.
+- Local browser execution with no data upload.
+- SVG and JPEG export for papers, posters, and slides.
+- Generic categorical matrices, not only one plant, species, or dataset.
+
+## What You Can Make
+
+- Genotype-style block figures.
+- Row-by-column categorical heatmaps.
+- Quality flag matrices.
+- State transition or status block diagrams.
+- Compact comparison figures for presentations and reports.
+
+Values are treated as categories and mapped to colors. Labels, annotations,
+regions, legends, and overlay objects can be adjusted from the GUI.
+
+## Input Example
 
 The simplest input is a TSV table:
 
@@ -30,15 +53,30 @@ row_03	A	H	B
 row_04	B	A	-
 ```
 
-Values are treated as categories and mapped to colors. The tool is useful for
-genotype-style matrices, quality flags, state blocks, or any compact
-row-by-column categorical figure.
+The app also supports Flapjack-like MAP + GENOTYPE text for users who already
+have that style of data.
 
-## Develop
+## Features
+
+- Manual row builder in the browser.
+- TSV paste/import workflow.
+- Flapjack-like MAP + GENOTYPE import.
+- GUI editing for labels, colors, regions, annotations, and overlays.
+- Figure export as SVG and JPEG.
+- Generic anonymized templates and example data.
+- No backend server required for normal use.
+
+## Development
 
 ```powershell
 npm install
 npm run dev
+```
+
+Open the local URL shown by Vite, usually:
+
+```text
+http://127.0.0.1:5174/
 ```
 
 ## Build
@@ -48,12 +86,26 @@ npm run typecheck
 npm run build
 ```
 
+## Credits
+
+Project idea, direction, and use-case design:
+
+- light-suzuki
+
+Code implementation was developed with AI assistance from OpenAI Codex using
+GPT-5.5 / GPT-5.4-family models and related coding models during the extraction
+and public-release preparation process.
+
+Special thanks to the Codex team and the creators of Codex for making this kind
+of small, practical research-tool development workflow possible.
+
 ## Citation
 
 If you use Matrix Block Canvas in academic work, please cite this repository.
-GitHub should show a "Cite this repository" option when `CITATION.cff` is
-present.
+The repository includes `CITATION.cff`, so GitHub should show a "Cite this
+repository" option.
 
 ## License
 
-MIT License.
+MIT License. You may use, copy, modify, publish, distribute, sublicense, and/or
+sell copies of the software, subject to the license terms.
