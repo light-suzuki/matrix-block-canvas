@@ -4,6 +4,11 @@
 
 <h1 align="center">Matrix Block Canvas</h1>
 
+
+[![CI](https://github.com/light-suzuki/matrix-block-canvas/actions/workflows/ci.yml/badge.svg)](https://github.com/light-suzuki/matrix-block-canvas/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/light-suzuki/=semver)](https://github.com/light-suzuki/matrix-block-canvas/releases)
+[![GitHub Pages](https://img.shields.io/badge/demo-GitHub%20Pages-blue)](https://light-suzuki.github.io/matrix-block-canvas/)
+
 <p align="center">
   日本語UIで、TSVから発表・論文向けのブロック行列図を作るブラウザツール。<br>
   A Japanese-first browser GUI for turning TSV or categorical matrices into clean block figures.
