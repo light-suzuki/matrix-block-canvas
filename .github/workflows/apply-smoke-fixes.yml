@@ -1,0 +1,56 @@
+name: Apply smoke-test fixes once
+
+on:
+  push:
+    branches: [e2e-smoke-test]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: e2e-smoke-test
+      - name: Apply targeted fixes found by browser smoke test
+        shell: python
+        run: |
+          from pathlib import Path
+
+          parser = Path('src/ggtTemplates.ts')
+          text = parser.read_text(encoding='utf-8')
+          old = 'if (isMetaRow(tag, ["chr", "chrom", "chromosome"])) {'
+          new = 'if (isMetaRow(tag, ["chr", "chrom", "chromosome", "group"])) {'
+          if old not in text and new not in text:
+              raise SystemExit('Could not find TSV chromosome/group meta-row parser target')
+          text = text.replace(old, new, 1)
+          parser.write_text(text, encoding='utf-8')
+
+          portable = Path('scripts/make-portable.mjs')
+          text = portable.read_text(encoding='utf-8')
+          old = '''  const attrs = openingTag
+            .replace(/\\s+src=([\'\"])[^\'\"]+\\1/i, "")
+            .replace(/\\s+crossorigin(?:=([\'\"])[^\'\"]*\\1)?/i, "");'''
+          new = '''  const attrs = openingTag
+            .replace(/\\s+src=([\'\"])[^\'\"]+\\1/i, "")
+            .replace(/\\s+crossorigin(?:=([\'\"])[^\'\"]*\\1)?/i, "")
+            .replace(/\\s+type=([\'\"])module\\1/i, "");'''
+          if old not in text and new not in text:
+              raise SystemExit('Could not find portable script-attribute target')
+          text = text.replace(old, new, 1)
+          portable.write_text(text, encoding='utf-8')
+      - name: Commit fixes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/ggtTemplates.ts scripts/make-portable.mjs
+          if git diff --cached --quiet; then
+            echo "Fixes already applied."
+            exit 0
+          fi
+          git commit -m "fix: make TSV group metadata and portable file launch work"
+          git push origin HEAD:e2e-smoke-test
