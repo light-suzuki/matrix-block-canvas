@@ -1,0 +1,41 @@
+name: Bump v1 version once
+
+on:
+  push:
+    branches: [finalize-v1]
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: finalize-v1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Set package version to 1.0.0
+        shell: bash
+        run: |
+          CURRENT=$(node -p "require('./package.json').version")
+          if [ "$CURRENT" = "1.0.0" ]; then
+            echo "Version is already 1.0.0."
+            exit 0
+          fi
+          npm version 1.0.0 --no-git-tag-version
+      - name: Commit package metadata
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          if git diff --cached --quiet; then
+            echo "No version change to commit."
+            exit 0
+          fi
+          git commit -m "chore: mark stable v1.0.0"
+          git push origin HEAD:finalize-v1
