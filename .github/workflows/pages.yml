@@ -21,13 +21,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Build
-        run: npm run build
-      - name: Upload artifact
+      - name: Build site and portable HTML
+        run: npm run portable
+      - name: Upload portable HTML
+        uses: actions/upload-artifact@v4
+        with:
+          name: MatrixBlockCanvas-portable
+          path: dist/MatrixBlockCanvas-portable.html
+          retention-days: 30
+      - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: dist
