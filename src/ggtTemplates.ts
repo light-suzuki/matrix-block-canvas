@@ -675,7 +675,7 @@ const parseWideTsv = (text: string): ParsedWideTsv => {
   if (idx < lines.length) {
     const cells = splitTsvLine(lines[idx]);
     const tag = cells[0] || "";
-    if (isMetaRow(tag, ["chr", "chrom", "chromosome"])) {
+    if (isMetaRow(tag, ["chr", "chrom", "chromosome", "group"])) {
       for (let i = 0; i < markers.length; i += 1) markers[i].chr = (cells[i + 1] || markers[i].chr || "").trim() || markers[i].chr;
       idx += 1;
     }
