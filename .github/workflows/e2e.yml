@@ -23,7 +23,7 @@ jobs:
         run: npm run portable
       - name: Install Playwright test runner
         run: |
-          npm install --no-save --package-lock=false @playwright/test
+          npm install --no-save --package-lock=false @playwright/test@1.63.0
           node -p "'Playwright ' + require('@playwright/test/package.json').version"
       - name: Confirm system Chrome
         run: google-chrome --version
