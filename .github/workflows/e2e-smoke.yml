@@ -1,0 +1,42 @@
+name: E2E smoke test
+
+on:
+  push:
+    branches: [e2e-smoke-test]
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install project dependencies
+        run: npm ci
+      - name: Build production site and portable HTML
+        run: npm run portable
+      - name: Install Playwright test runner
+        run: npm install --no-save --package-lock=false @playwright/test
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Start production preview
+        shell: bash
+        run: |
+          npm run preview -- --port 4173 > /tmp/matrix-preview.log 2>&1 &
+          echo $! > /tmp/matrix-preview.pid
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:4173/ >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/matrix-preview.log
+          exit 1
+      - name: Run browser smoke tests
+        run: npx playwright test e2e/smoke.spec.mjs --reporter=line --workers=1
+      - name: Show preview log on failure
+        if: failure()
+        run: cat /tmp/matrix-preview.log || true
