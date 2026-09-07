@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Resolve package version
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Check whether this version is already released
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "$TAG already exists; nothing to publish."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install dependencies
+        if: steps.release.outputs.exists == 'false'
+        run: npm ci
+      - name: Build portable release artifact
+        if: steps.release.outputs.exists == 'false'
+        run: npm run portable
+      - name: Write release notes
+        if: steps.release.outputs.exists == 'false'
+        shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          cat > /tmp/release-notes.md <<EOF
+          ## Matrix Block Canvas ${TAG}
+
+          Stable release of Matrix Block Canvas for creating matrix/block and graphical-genotype style figures in the browser.
+
+          ### Included
+          - Builder, TSV, and Flapjack-style input paths
+          - palette/theme and layout customization
+          - SVG and JPEG export
+          - single-file portable HTML for offline/direct use on another PC
+          - Windows one-click setup scripts
+          - beginner-friendly README and customization guide
+
+          ### Validation
+          - Ubuntu and Windows CI
+          - TypeScript typecheck and production build
+          - dependency audit at high severity or above
+          - Chrome smoke tests for TSV generation, SVG/JPEG export, Flapjack generation, and direct file:// portable launch
+
+          For ordinary use, the attached **MatrixBlockCanvas-portable.html** can be saved to a Windows PC and opened in a current browser without installing Node.js.
+          EOF
+      - name: Publish GitHub Release
+        if: steps.release.outputs.exists == 'false'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            "dist/MatrixBlockCanvas-portable.html#MatrixBlockCanvas-portable.html" \
+            --target "$GITHUB_SHA" \
+            --title "Matrix Block Canvas $TAG" \
+            --notes-file /tmp/release-notes.md

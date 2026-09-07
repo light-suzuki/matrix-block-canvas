@@ -1,6 +1,6 @@
 {
   "name": "matrix-block-canvas",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Client-side matrix block figure maker for TSV and categorical data.",
   "type": "module",
   "engines": {
