@@ -18,10 +18,28 @@ jobs:
         run: npm ci
       - name: Build production site and portable HTML
         run: npm run portable
+      - name: Check portable script is classic-script compatible
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const html = fs.readFileSync('dist/MatrixBlockCanvas-portable.html', 'utf8');
+          const scripts = [...html.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/gi)];
+          if (scripts.length !== 1) throw new Error(`Expected one inline script, found ${scripts.length}`);
+          console.log(`Inline script attributes: ${scripts[0][1] || '(none)'}`);
+          if (/\btype\s*=\s*['"]module['"]/i.test(scripts[0][1])) throw new Error('Portable script still has type=module');
+          try {
+            new Function(scripts[0][2]);
+            console.log('Classic-script syntax check: OK');
+          } catch (error) {
+            console.error('Classic-script syntax check failed:', error);
+            process.exit(1);
+          }
+          NODE
       - name: Install Playwright test runner
         run: npm install --no-save --package-lock=false @playwright/test
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+      - name: Confirm preinstalled Chrome
+        run: google-chrome --version
       - name: Start production preview
         shell: bash
         run: |
