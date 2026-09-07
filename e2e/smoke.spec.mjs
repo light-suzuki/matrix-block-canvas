@@ -36,7 +36,7 @@ test('production web app: TSV generation and SVG/JPEG export work', async ({ pag
   await page.getByRole('button', { name: 'TSV', exact: true }).click();
   await page.getByRole('button', { name: '例を入れる', exact: true }).click();
   const tsv = page.locator('textarea.seq-textarea');
-  await expect(tsv).toContainText('row_04');
+  await expect(tsv).toHaveValue(/row_04/);
   await page.getByRole('button', { name: 'TSV から生成', exact: true }).click();
   await expect(page.getByText(/3 markers • 4 rows/)).toBeVisible();
   await expect(page.locator('svg').first()).toBeVisible();
