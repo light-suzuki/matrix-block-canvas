@@ -7,13 +7,28 @@ test.use({ channel: 'chrome' });
 
 const collectRuntimeErrors = (page) => {
   const errors = [];
+
   page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));
+
+  // Chrome may emit a generic console 404 for an optional favicon without
+  // including the URL. Track HTTP failures via the response event instead so
+  // real same-origin asset failures remain visible while harmless noise does not.
+  page.on('response', (response) => {
+    if (response.status() < 400) return;
+    const url = response.url();
+    if (/\/favicon\.ico(?:\?|$)/i.test(url)) return;
+    if (/fonts\.googleapis\.com|fonts\.gstatic\.com/i.test(url)) return;
+    errors.push(`http ${response.status()}: ${url}`);
+  });
+
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
     const text = message.text();
+    if (/Failed to load resource/i.test(text)) return;
     if (/fonts\.googleapis\.com|fonts\.gstatic\.com/i.test(text)) return;
     errors.push(`console: ${text}`);
   });
+
   return errors;
 };
 
