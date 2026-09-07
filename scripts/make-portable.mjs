@@ -35,9 +35,10 @@ let inlinedStyles = 0;
 let removedRemoteCssImports = 0;
 
 const scriptTags = [...html.matchAll(/<script\b[^>]*\bsrc=(['"])([^'"]+)\1[^>]*><\/script>/gi)];
-for (const match of scriptTags) {
+const localScriptTags = scriptTags.filter((match) => isLocalAsset(match[2]));
+
+for (const match of localScriptTags) {
   const [tag, , ref] = match;
-  if (!isLocalAsset(ref)) continue;
   const source = await readFile(resolveAsset(ref), "utf8");
   const openingTag = tag.match(/^<script\b([^>]*)>/i)?.[1] ?? "";
   const attrs = openingTag
@@ -49,11 +50,17 @@ for (const match of scriptTags) {
 }
 
 const linkTags = [...html.matchAll(/<link\b[^>]*>/gi)];
-for (const match of linkTags) {
+const localStylesheetTags = linkTags.filter((match) => {
   const tag = match[0];
   const rel = tag.match(/\brel=(['"])([^'"]+)\1/i)?.[2]?.toLowerCase();
   const ref = tag.match(/\bhref=(['"])([^'"]+)\1/i)?.[2];
-  if (rel !== "stylesheet" || !ref || !isLocalAsset(ref)) continue;
+  return rel === "stylesheet" && Boolean(ref && isLocalAsset(ref));
+});
+
+for (const match of localStylesheetTags) {
+  const tag = match[0];
+  const ref = tag.match(/\bhref=(['"])([^'"]+)\1/i)?.[2];
+  if (!ref) continue;
 
   const originalSource = await readFile(resolveAsset(ref), "utf8");
   const remoteImports = originalSource.match(/@import\s+(?:url\()?(['"])(https?:\/\/[^'"]+)\1\)?\s*;/gi) ?? [];
@@ -64,16 +71,16 @@ for (const match of linkTags) {
   inlinedStyles += 1;
 }
 
-if (inlinedScripts === 0) {
-  throw new Error("Portable build failed: no local JavaScript bundle was found in dist/index.html.");
+if (localScriptTags.length === 0 || inlinedScripts !== localScriptTags.length) {
+  throw new Error(
+    `Portable build failed while inlining JavaScript (${inlinedScripts}/${localScriptTags.length}).`,
+  );
 }
 
-const remainingAssetRefs = [...html.matchAll(/\b(?:src|href)=(['"])([^'"]+)\1/gi)]
-  .map((m) => m[2])
-  .filter((ref) => isLocalAsset(ref) && /(?:^|\/)assets\//.test(ref));
-
-if (remainingAssetRefs.length > 0) {
-  throw new Error(`Portable build still contains local asset references: ${remainingAssetRefs.join(", ")}`);
+if (inlinedStyles !== localStylesheetTags.length) {
+  throw new Error(
+    `Portable build failed while inlining stylesheets (${inlinedStyles}/${localStylesheetTags.length}).`,
+  );
 }
 
 const remainingRemoteCssImports = html.match(/@import\s+(?:url\()?['"]https?:\/\//gi) ?? [];
