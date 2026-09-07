@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+test.use({ channel: 'chrome' });
+
 const collectRuntimeErrors = (page) => {
   const errors = [];
   page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));
@@ -32,7 +34,6 @@ test('production web app: TSV generation and SVG/JPEG export work', async ({ pag
 
   await expect(page.getByRole('heading', { name: 'Genotype Canvas' })).toBeVisible();
 
-  // Generate the bundled example through the real TSV import UI.
   await page.getByRole('button', { name: 'TSV', exact: true }).click();
   await page.getByRole('button', { name: '例を入れる', exact: true }).click();
   const tsv = page.locator('textarea.seq-textarea');
@@ -41,7 +42,6 @@ test('production web app: TSV generation and SVG/JPEG export work', async ({ pag
   await expect(page.getByText(/3 markers • 4 rows/)).toBeVisible();
   await expect(page.locator('svg').first()).toBeVisible();
 
-  // SVG export: verify that the downloaded file is actual SVG/XML, not only that a click happened.
   await page.getByRole('button', { name: 'Export', exact: true }).click();
   await page.getByLabel('形式').selectOption('svg');
   const svgDownloadPromise = page.waitForEvent('download');
@@ -53,7 +53,6 @@ test('production web app: TSV generation and SVG/JPEG export work', async ({ pag
   expect(svgText).toContain('<svg');
   expect(svgText).toContain('xmlns="http://www.w3.org/2000/svg"');
 
-  // JPEG export: verify JPEG magic bytes and that meaningful image data was produced.
   await page.getByLabel('形式').selectOption('jpeg');
   const jpegDownloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: '保存', exact: true }).click();
@@ -64,7 +63,6 @@ test('production web app: TSV generation and SVG/JPEG export work', async ({ pag
   expect(jpegBytes[0]).toBe(0xff);
   expect(jpegBytes[1]).toBe(0xd8);
 
-  // A second parser/generator path: bundled Flapjack example from Quick Start.
   await page.getByRole('button', { name: 'Quick', exact: true }).click();
   await page.getByRole('button', { name: 'Flapjack 例 → 生成', exact: true }).click();
   await expect(page.getByText(/3 markers • 4 rows/)).toBeVisible();
