@@ -30,8 +30,26 @@ function Test-SupportedNode {
     return ($major -gt 20) -or ($major -eq 20 -and $minor -ge 19)
 }
 
+function Get-NpmCommand {
+    $npmCmd = Get-Command npm.cmd -ErrorAction SilentlyContinue
+    if ($npmCmd) {
+        return $npmCmd.Source
+    }
+
+    $npm = Get-Command npm -ErrorAction SilentlyContinue
+    if ($npm) {
+        return $npm.Source
+    }
+
+    throw "npm was not found even though Node.js is available. Reinstall Node.js LTS and try again."
+}
+
 Write-Host "Matrix Block Canvas - Windows setup" -ForegroundColor Cyan
 Write-Host "Project: $ProjectRoot"
+
+if ($ProjectRoot.Contains("&")) {
+    throw "The project path contains '&', which can break npm/Vite command shims on Windows. Move the folder to a path without '&' and run SETUP_WINDOWS.cmd again."
+}
 
 if (-not (Test-SupportedNode)) {
     if ($SkipNodeInstall) {
@@ -54,19 +72,20 @@ if (-not (Test-SupportedNode)) {
     }
 }
 
+$npmCommand = Get-NpmCommand
 $nodeVersion = (& node --version).Trim()
-$npmVersion = (& npm --version).Trim()
+$npmVersion = (& $npmCommand --version).Trim()
 Write-Host "Node: $nodeVersion"
 Write-Host "npm : $npmVersion"
 
 Write-Host "Installing locked dependencies (npm ci)..." -ForegroundColor Yellow
-& npm ci
+& $npmCommand ci
 if ($LASTEXITCODE -ne 0) {
     throw "npm ci failed (exit code $LASTEXITCODE)."
 }
 
 Write-Host "Running typecheck, production build, and portable build..." -ForegroundColor Yellow
-& npm run check
+& $npmCommand run check
 if ($LASTEXITCODE -ne 0) {
     throw "Project validation failed (exit code $LASTEXITCODE)."
 }
@@ -76,7 +95,7 @@ if (-not (Test-Path $PortablePath)) {
     throw "Portable build was not created: $PortablePath"
 }
 
-Write-Host "" 
+Write-Host ""
 Write-Host "Setup complete." -ForegroundColor Green
 Write-Host "Portable app: $PortablePath"
 Write-Host "You can copy that single HTML file to another Windows PC and open it in Edge/Chrome/Firefox."
