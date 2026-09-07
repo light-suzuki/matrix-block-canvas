@@ -48,7 +48,7 @@ GitHub Pagesのデプロイでも同じportable HTMLを生成するため、main
 
 https://light-suzuki.github.io/matrix-block-canvas/MatrixBlockCanvas-portable.html
 
-portable版ではビルド時に外部Webフォントの `@import` を除去するため、起動自体にネット接続は不要です。
+portable版ではビルド時に外部Webフォントの `@import` を除去し、残存する外部CSS importがないことを検査します。
 フォントはWindows/ブラウザのシステムフォントへフォールバックします。
 
 ### 3. ソースからWindows PCへセットアップ: ダブルクリック
@@ -61,8 +61,8 @@ SETUP_WINDOWS.cmd
 
 このスクリプトは次を自動実行します。
 
-1. Node.js 20.19+ があるか確認
-2. なければ `winget` でNode.js LTSをインストール
+1. 対応Node.js（20.19–20.x または 22.12+）があるか確認
+2. なければ `winget` で現在のNode.js LTSをインストール
 3. `npm ci` でlockfileどおりに依存関係を再現
 4. TypeScript typecheck
 5. Vite production build
@@ -118,9 +118,11 @@ row_04	B	A	-
 ### 必要環境
 
 - Windows 10 / 11
-- Node.js 20.19+（現行LTS推奨）
+- Node.js 20.19–20.x または 22.12+（現在のLTS推奨）
 - npm
 - Edge / Chrome / Firefoxの現行版
+
+Vite 8のNode.js要件に合わせています。
 
 ### cloneして起動
 
@@ -152,9 +154,9 @@ npm run check
 
 - `npm run typecheck`
 - `npm run build`
-- portable単一HTML生成と残存ローカルasset参照の検査
+- portable単一HTML生成と埋め込み検査
 
-GitHub ActionsでもUbuntuとWindowsの両方で同じ検証を実行します。
+GitHub ActionsではUbuntuとWindowsの両方で同じ検証を実行し、high以上の既知npm依存脆弱性がないことも検査します。
 
 ### 個別コマンド
 
@@ -179,7 +181,7 @@ TSVなどの元データ、書き出したSVG/JPEGは通常のファイルとし
 
 ## CI / 配布
 
-- `.github/workflows/ci.yml`: Ubuntu + Windowsで `npm ci` と `npm run check`
+- `.github/workflows/ci.yml`: Ubuntu + Windowsで `npm ci`、high以上のnpm audit、`npm run check`
 - `.github/workflows/pages.yml`: GitHub Pages用ビルドとportable HTML生成
 - Pages workflowでは `MatrixBlockCanvas-portable.html` もworkflow artifactとして保存
 
