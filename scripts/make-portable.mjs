@@ -43,7 +43,8 @@ for (const match of localScriptTags) {
   const openingTag = tag.match(/^<script\b([^>]*)>/i)?.[1] ?? "";
   const attrs = openingTag
     .replace(/\s+src=(['"])[^'"]+\1/i, "")
-    .replace(/\s+crossorigin(?:=(['"])[^'"]*\1)?/i, "");
+    .replace(/\s+crossorigin(?:=(['"])[^'"]*\1)?/i, "")
+    .replace(/\s+type=(['"])module\1/i, "");
   const replacement = `<script${attrs}>\n${escapeInlineScript(source)}\n</script>`;
   html = html.replace(tag, replacement);
   inlinedScripts += 1;
