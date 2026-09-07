@@ -3,11 +3,18 @@
   "version": "0.1.0",
   "description": "Client-side matrix block figure maker for TSV and categorical data.",
   "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
+    "dev:lan": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "portable:from-build": "node scripts/make-portable.mjs",
+    "portable": "npm run build && npm run portable:from-build",
+    "check": "npm run typecheck && npm run build && npm run portable:from-build"
   },
   "dependencies": {
     "@vitejs/plugin-react-swc": "^3.6.0",
