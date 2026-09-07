@@ -27,7 +27,12 @@ function Test-SupportedNode {
 
     $major = [int]$parts[0]
     $minor = [int]$parts[1]
-    return ($major -gt 20) -or ($major -eq 20 -and $minor -ge 19)
+
+    if ($major -eq 20) {
+        return $minor -ge 19
+    }
+
+    return ($major -gt 22) -or ($major -eq 22 -and $minor -ge 12)
 }
 
 function Get-NpmCommand {
@@ -53,11 +58,11 @@ if ($ProjectRoot.Contains("&")) {
 
 if (-not (Test-SupportedNode)) {
     if ($SkipNodeInstall) {
-        throw "Node.js 20.19+ is required. Install the current Node.js LTS release and run this script again."
+        throw "Supported Node.js is required: 20.19-20.x or 22.12+. Install the current Node.js LTS release and run this script again."
     }
 
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        throw "Node.js 20.19+ was not found and winget is unavailable. Install Node.js LTS from https://nodejs.org/ and run SETUP_WINDOWS.cmd again."
+        throw "Supported Node.js was not found and winget is unavailable. Install the current Node.js LTS release from https://nodejs.org/ and run SETUP_WINDOWS.cmd again."
     }
 
     Write-Host "Installing/updating Node.js LTS with winget..." -ForegroundColor Yellow
@@ -68,7 +73,7 @@ if (-not (Test-SupportedNode)) {
 
     Refresh-ProcessPath
     if (-not (Test-SupportedNode)) {
-        throw "Node.js was installed, but this terminal cannot see the new PATH yet. Close this window and run SETUP_WINDOWS.cmd once more."
+        throw "Node.js was installed, but this terminal cannot see a supported version yet. Close this window and run SETUP_WINDOWS.cmd once more."
     }
 }
 
