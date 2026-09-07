@@ -81,7 +81,13 @@ test('portable single-file build opens directly and can generate a figure', asyn
   expect(fs.existsSync(portablePath)).toBe(true);
 
   await page.goto(pathToFileURL(portablePath).href, { waitUntil: 'load' });
-  await expect(page.getByRole('heading', { name: 'Genotype Canvas' })).toBeVisible();
+  await page.waitForTimeout(750);
+  const heading = page.getByRole('heading', { name: 'Genotype Canvas' });
+  if ((await heading.count()) === 0) {
+    const bodyText = (await page.locator('body').innerText()).slice(0, 1500);
+    throw new Error(`Portable UI did not render. Runtime errors:\n${runtimeErrors.join('\n') || '(none)'}\nBody:\n${bodyText}`);
+  }
+  await expect(heading).toBeVisible();
   await page.getByRole('button', { name: 'Quick', exact: true }).click();
   await page.getByRole('button', { name: 'TSV 例 → 生成', exact: true }).click();
   await expect(page.getByText(/3 markers • 4 rows/)).toBeVisible();
