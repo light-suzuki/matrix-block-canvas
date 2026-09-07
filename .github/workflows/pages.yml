@@ -18,17 +18,23 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Build
-        run: npm run build
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: Build site and portable HTML
+        run: npm run portable
+      - name: Upload portable HTML
+        uses: actions/upload-artifact@v7
+        with:
+          name: MatrixBlockCanvas-portable
+          path: dist/MatrixBlockCanvas-portable.html
+          retention-days: 30
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
         with:
           path: dist
   deploy:
@@ -40,4 +46,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
