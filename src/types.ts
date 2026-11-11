@@ -19,7 +19,7 @@ export interface BuilderRow {
 }
 
 export type BuilderEditMode = "grid" | "preview";
-export type BuilderFigureMode = "simple" | "fa_zoom";
+export type BuilderFigureMode = "simple" | "fa_zoom" | "thesis";
 export type BuilderZoomStages = 1 | 2;
 export type BuilderTool = "brush" | "cycle";
 export type BuilderCycleOrder = "AB-" | "AHB-";
