@@ -1,5 +1,9 @@
-import React, { forwardRef, useMemo } from "react";
+import React, { forwardRef, useEffect, useMemo, useState } from "react";
 import type { ColumnGroup, GraphConfig, GraphTrack, LegendConfig, OverlayShape, XAxisConfig } from "./ggtTemplates";
+import { getAxisTrackMetrics, layoutAxisLabels } from "./axisLabelLayout";
+import { createCanvasTextMeasurer, type MeasureTextW } from "./textMetrics";
+
+export { createCanvasTextMeasurer, approxTextW } from "./textMetrics";
 
 type Normalized = {
   width: number;
@@ -81,52 +85,6 @@ const clamp = (v: number, min: number, max: number): number => {
   return Math.max(min, Math.min(max, n));
 };
 
-type MeasureTextW = (text: string, fontSize: number, fontWeight?: number) => number;
-
-const approxTextW: MeasureTextW = (text: string, fontSize: number): number => Math.max(0, Math.round(String(text ?? "").length * fontSize * 0.62));
-
-const createCanvasTextMeasurer = (fontFamily: string): MeasureTextW => {
-  const MAX_CACHE_SIZE = 4000;
-  const cache = new Map<string, number>();
-  let ctx: CanvasRenderingContext2D | null = null;
-
-  const getCtx = (): CanvasRenderingContext2D | null => {
-    if (ctx) return ctx;
-    if (typeof document === "undefined") return null;
-    const canvas = document.createElement("canvas");
-    ctx = canvas.getContext("2d");
-    return ctx;
-  };
-
-  return (text: string, fontSize: number, fontWeight = 400): number => {
-    const raw = String(text ?? "");
-    if (!raw) return 0;
-    const fs = Number.isFinite(fontSize) ? Math.max(1, Math.round(fontSize)) : 12;
-    const fw = Number.isFinite(fontWeight) ? Math.max(100, Math.min(900, Math.round(fontWeight / 100) * 100)) : 400;
-    const key = `${fw}|${fs}|${raw}`;
-    const cached = cache.get(key);
-    if (cached !== undefined) return cached;
-
-    const c = getCtx();
-    let w = 0;
-    if (!c) {
-      w = approxTextW(raw, fs, fw);
-    } else {
-      c.font = `${fw} ${fs}px ${fontFamily}`;
-      w = c.measureText(raw).width;
-    }
-    const out = Math.max(0, Math.round(w));
-    if (cache.size >= MAX_CACHE_SIZE) {
-      // Evict oldest half of the entries to keep memory bounded
-      const keys = Array.from(cache.keys());
-      const evictCount = Math.floor(MAX_CACHE_SIZE / 2);
-      for (let i = 0; i < evictCount; i += 1) cache.delete(keys[i]);
-    }
-    cache.set(key, out);
-    return out;
-  };
-};
-
 const splitAnnotationColumns = (text: string | undefined | null): string[] => {
   const raw = String(text ?? "").trim();
   if (!raw) return [];
@@ -139,27 +97,6 @@ const trimTrailingEmptyColumns = (cols: string[]): string[] => {
   let last = cols.length - 1;
   while (last >= 0 && !String(cols[last] ?? "").trim()) last -= 1;
   return cols.slice(0, last + 1);
-};
-
-const truncateToWidth = (text: string, maxWidth: number, fontSize: number, measureW: MeasureTextW, fontWeight = 400): string => {
-  const raw = String(text ?? "");
-  const w = measureW(raw, fontSize, fontWeight);
-  if (w <= maxWidth) return raw;
-  if (maxWidth <= 0) return "";
-  const ell = "…";
-  const ellW = measureW(ell, fontSize, fontWeight);
-  if (ellW >= maxWidth) return ell;
-
-  let lo = 0;
-  let hi = raw.length;
-  while (lo < hi) {
-    const mid = Math.ceil((lo + hi) / 2);
-    const cand = `${raw.slice(0, mid)}${ell}`;
-    if (measureW(cand, fontSize, fontWeight) <= maxWidth) lo = mid;
-    else hi = mid - 1;
-  }
-  if (lo <= 0) return ell;
-  return `${raw.slice(0, lo)}${ell}`;
 };
 
 const fitFontSizeToWidth = (text: string, maxWidth: number, fontSize: number, measureW: MeasureTextW, fontWeight = 400, minFontSize = 9): number => {
@@ -300,7 +237,19 @@ const normalizeConfig = (raw: GraphConfig): Normalized => {
 
 export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphConfig; editor?: EditorOverlayState }>((props, ref) => {
   const cfg = useMemo(() => normalizeConfig(props.config), [props.config]);
-  const measureW = useMemo(() => createCanvasTextMeasurer(cfg.text.fontFamily), [cfg.text.fontFamily]);
+  const [fontRevision, setFontRevision] = useState(0);
+  useEffect(() => {
+    if (typeof document === "undefined" || !document.fonts) return;
+    let active = true;
+    const refresh = (): void => { if (active) setFontRevision((n) => n + 1); };
+    void document.fonts.ready.then(refresh);
+    document.fonts.addEventListener("loadingdone", refresh);
+    return () => {
+      active = false;
+      document.fonts.removeEventListener("loadingdone", refresh);
+    };
+  }, []);
+  const measureW = useMemo(() => createCanvasTextMeasurer(cfg.text.fontFamily), [cfg.text.fontFamily, fontRevision]);
   const editor = props.editor;
   const annotationAreaX = cfg.plotX + cfg.plotWidth + 24;
   const leftLabelX = Math.max(10, cfg.plotX - 14);
@@ -339,7 +288,8 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
     }
   }
   if (showMarkColumn) maxMarkHalf = Math.max(maxMarkHalf, 20);
-  const markColW = showMarkColumn ? Math.max(44, Math.round(maxMarkHalf * 2 + 10)) : 0;
+  const markHeaderW = measureW(cfg.annotationHeaders?.right || "", cfg.annotationHeaders?.fontSize ?? cfg.text.fontSize, 900);
+  const markColW = showMarkColumn ? Math.max(44, Math.round(maxMarkHalf * 2 + 10), markHeaderW + 8) : 0;
 
   const desiredAnnoColWs: number[] = Array.from({ length: annotationCols }, () => 0);
   for (let i = 0; i < annotationCols; i += 1) {
@@ -430,7 +380,10 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
     const strokeWidth = axis.strokeWidth ?? Math.max(1, cfg.colLine.strokeWidth);
     const tickStroke = axis.tickStroke || stroke;
     const tickStrokeWidth = axis.tickStrokeWidth ?? strokeWidth;
-    const tickSize = axis.tickSize ?? Math.max(10, Math.round(h * 0.38));
+    const metrics = getAxisTrackMetrics(axis, cfg.plotX, cfg.plotWidth, h, cfg.text.fontSize, measureW);
+    const tickSize = metrics.tickSize;
+    const topLabels = new Map(metrics.top.labels.map((label) => [label.index, label]));
+    const bottomLabels = new Map(metrics.bottom.labels.map((label) => [label.index, label]));
     const topFill = axis.labelTopFill || cfg.text.fill;
     const bottomFill = axis.labelBottomFill || cfg.text.fill;
     const topFontSize = axis.labelTopFontSize ?? Math.max(10, Math.round(cfg.text.fontSize * 0.75));
@@ -440,7 +393,7 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
     const titleFontSize = axis.titleFontSize ?? Math.max(topFontSize, Math.round(topFontSize * 1.0));
 
     return (
-      <g>
+      <g data-ggt-axis-track={track.id}>
         <line x1={cfg.plotX} x2={cfg.plotX + cfg.plotWidth} y1={axisY} y2={axisY} stroke={stroke} strokeWidth={strokeWidth} opacity={0.9} />
 	        {axis.ticks.map((t, i) => {
 	          const x = cfg.plotX + clamp(t.x, 0, 1) * cfg.plotWidth;
@@ -451,13 +404,28 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
 	          const bottom = (t.labelBottom || "").trim();
 	          const tickTopFill = t.labelTopFill || topFill;
 	          const tickBottomFill = t.labelBottomFill || bottomFill;
+	          const topPlan = topLabels.get(i);
+	          const bottomPlan = bottomLabels.get(i);
+	          const topX = topPlan?.x ?? x;
+	          const bottomX = bottomPlan?.x ?? x;
+	          const topY = y1 - 4 - (topPlan?.lane ?? 0) * metrics.top.lineHeight;
+	          const bottomY = y2 + 4 + (bottomPlan?.lane ?? 0) * metrics.bottom.lineHeight;
 	          return (
 	            <g key={i}>
 	              <line x1={x} x2={x} y1={y1} y2={y2} stroke={tickStroke} strokeWidth={tickStrokeWidth} opacity={0.9} />
+	              {top && (Math.abs(topX - x) > 1 || (topPlan?.lane ?? 0) > 0) ? (
+	                <line data-ggt-label-leader="top" x1={x} y1={y1} x2={topX} y2={topY + 2} stroke={tickStroke} strokeWidth={Math.min(1, tickStrokeWidth)} />
+	              ) : null}
+	              {bottom && (Math.abs(bottomX - x) > 1 || (bottomPlan?.lane ?? 0) > 0) ? (
+	                <line data-ggt-label-leader="bottom" x1={x} y1={y2} x2={bottomX} y2={bottomY - 2} stroke={tickStroke} strokeWidth={Math.min(1, tickStrokeWidth)} />
+	              ) : null}
 	              {top ? (
 	                <text
-	                  x={x}
-	                  y={y1 - 2}
+	                  data-ggt-label="marker-name"
+	                  data-ggt-marker-index={i}
+	                  data-ggt-track-id={track.id}
+	                  x={topX}
+	                  y={topY}
 	                  fill={tickTopFill}
 	                  fontFamily={cfg.text.fontFamily}
 	                  fontSize={topFontSize}
@@ -470,8 +438,11 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
 	              ) : null}
 	              {bottom ? (
 	                <text
-	                  x={x}
-	                  y={y2 + 2}
+	                  data-ggt-label="marker-position"
+	                  data-ggt-marker-index={i}
+	                  data-ggt-track-id={track.id}
+	                  x={bottomX}
+	                  y={bottomY}
 	                  fill={tickBottomFill}
 	                  fontFamily={cfg.text.fontFamily}
 	                  fontSize={bottomFontSize}
@@ -516,6 +487,7 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
           label ? (
             <text
               key={`anno-h-${i}`}
+              data-ggt-label="annotation-header"
               x={(annoColXs[i] ?? annotationAreaX) + (annoColWs[i] ?? 120) * 0.5}
               y={y}
               fill={headers.fill}
@@ -524,16 +496,13 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
               fontWeight={900}
               textAnchor="middle"
             >
-              {(() => {
-                const colW = annoColWs[i] ?? 120;
-                const fs = fitFontSizeToWidth(label, colW, headers.fontSize, measureW, 900, 10);
-                return truncateToWidth(label, colW, fs, measureW, 900);
-              })()}
+              {label}
             </text>
           ) : null,
         )}
         {headers.right ? (
           <text
+            data-ggt-label="mark-header"
             x={markX}
             y={y}
             fill={headers.fill}
@@ -555,7 +524,8 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
     const boundaries = cfg.xBoundaries.length ? cfg.xBoundaries : Array.from({ length: cfg.columns + 1 }, (_, i) => i / cfg.columns);
     const axis = cfg.xAxis;
     const axisOnTop = Boolean(axis && axis.show !== false && axis.placement !== "bottom" && axis.ticks?.length);
-    const axisPad = axisOnTop ? (axis?.offset ?? 18) + (axis?.tickSize ?? 7) + (axis?.fontSize ?? 12) + 14 : 16;
+    const axisLabels = axisOnTop && axis ? layoutAxisLabels(axis.ticks, cfg.plotX, cfg.plotWidth, axis.fontSize ?? 12, measureW, 700) : undefined;
+    const axisPad = axisOnTop ? (axis?.offset ?? 18) + (axis?.tickSize ?? 7) + (axisLabels?.height ?? 12) + 14 : 16;
     const labelY = Math.max(12, cfg.plotY - axisPad);
     return (
       <g>
@@ -615,6 +585,8 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
     const x1 = cfg.plotX + cfg.plotWidth;
 
     const title = (axis.title || "").trim();
+    const labelPlan = layoutAxisLabels(ticks, cfg.plotX, cfg.plotWidth, fontSize, measureW, 700);
+    const labelsByIndex = new Map(labelPlan.labels.map((label) => [label.index, label]));
 
     return (
       <g>
@@ -624,13 +596,19 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
           const len = t.major ? tickSize : Math.max(3, Math.round(tickSize * 0.6));
           const y2 = yLine + tickDir * len;
           const label = (t.label || "").trim();
-          const labelY = yLine + tickDir * (len + 4);
+          const planned = labelsByIndex.get(i);
+          const labelX = planned?.x ?? x;
+          const labelY = yLine + tickDir * (len + 4 + (planned?.lane ?? 0) * labelPlan.lineHeight);
           return (
             <g key={i}>
               <line x1={x} x2={x} y1={yLine} y2={y2} stroke={axis.stroke} strokeWidth={axis.strokeWidth ?? 1} opacity={0.85} />
+              {label && (Math.abs(labelX - x) > 1 || (planned?.lane ?? 0) > 0) ? (
+                <line data-ggt-label-leader="x-axis" x1={x} y1={y2} x2={labelX} y2={labelY - tickDir * 2} stroke={axis.stroke} strokeWidth={1} />
+              ) : null}
               {label ? (
                 <text
-                  x={x}
+                  data-ggt-label="x-axis"
+                  x={labelX}
                   y={labelY}
                   fill={axis.fill || cfg.text.fill}
                   fontFamily={cfg.text.fontFamily}
@@ -772,16 +750,15 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
 
     const titleFontSize = Math.max(fontSize, Math.round(fontSize * 1.05));
     const boxW = computeBoxW(fontSize);
-    const titleHeight = title ? titleFontSize + 14 : 0;
-    const boxH = padding * 2 + titleHeight + items.length * itemSize + Math.max(0, items.length - 1) * itemGap;
+    const titleHeight = title ? Math.ceil(titleFontSize * 1.25) + 14 : 0;
+    const itemHeight = Math.max(itemSize, Math.ceil(fontSize * 1.35));
+    const boxH = padding * 2 + titleHeight + items.length * itemHeight + Math.max(0, items.length - 1) * itemGap;
 
     const bg = legend.background;
     const border = legend.border;
     const borderWidth = legend.borderWidth ?? 1;
-    const labelAvailW = Math.max(20, boxW - padding * 2 - itemSize - 10);
-
     return (
-      <g>
+      <g data-ggt-legend="true">
         {bg || border ? (
           <rect
             x={x}
@@ -806,18 +783,18 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
             textAnchor="middle"
             dominantBaseline="hanging"
           >
-            {truncateToWidth(title, Math.max(20, boxW - padding * 2), titleFontSize, measureW, 800)}
+            {title}
           </text>
         ) : null}
         {items.map((it, i) => {
-          const y0 = y + padding + titleHeight + i * (itemSize + itemGap);
+          const y0 = y + padding + titleHeight + i * (itemHeight + itemGap);
           const stroke = it.stroke || "none";
           const strokeWidth = it.strokeWidth ?? 0;
           return (
             <g key={`${it.label}-${i}`}>
               <rect
                 x={x + padding}
-                y={y0}
+                y={y0 + (itemHeight - itemSize) * 0.5}
                 width={itemSize}
                 height={itemSize}
                 fill={it.fill}
@@ -826,14 +803,14 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
               />
               <text
                 x={x + padding + itemSize + 10}
-                y={y0 + itemSize * 0.5}
+                y={y0 + itemHeight * 0.5}
                 fill={textFill}
                 fontFamily={cfg.text.fontFamily}
                 fontSize={fontSize}
                 fontWeight={700}
                 dominantBaseline="middle"
               >
-                {truncateToWidth(it.label || "", labelAvailW, fontSize, measureW, 700)}
+                {it.label || ""}
               </text>
             </g>
           );
@@ -947,7 +924,8 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
           return null;
         })}
         {draft && (draft.layer || "over") === layer ? (
-          (() => {
+          <g data-export-exclude="true">
+          {(() => {
             const opacity = (draft as { opacity?: unknown }).opacity;
             const opacityNum = Number.isFinite(opacity as number) ? (opacity as number) : 0.7;
             if ((draft as { kind?: unknown }).kind === "line") {
@@ -1030,7 +1008,8 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
               );
             }
             return null;
-          })()
+          })()}
+          </g>
         ) : null}
       </g>
     );
@@ -1235,7 +1214,7 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
   };
 
   return (
-    <svg ref={ref} viewBox={`0 0 ${cfg.width} ${cfg.height}`} xmlns="http://www.w3.org/2000/svg">
+    <svg ref={ref} width={cfg.width} height={cfg.height} viewBox={`0 0 ${cfg.width} ${cfg.height}`} xmlns="http://www.w3.org/2000/svg" textRendering="geometricPrecision" style={{ letterSpacing: 0 }}>
       <defs>
         <marker
           id="ggt-arrow"
@@ -1291,7 +1270,7 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
         const crossStrokeWidth = cross?.strokeWidth ?? 6;
 
         return (
-          <g key={track.id} transform={`translate(0, 0)`}>
+          <g key={track.id} data-ggt-track={track.id} transform={`translate(0, 0)`}>
             {axisTrack}
             {(Array.isArray(track.segments) ? track.segments : []).map((seg, i) => {
               const start = clamp(seg.start, 0, 1);
@@ -1322,6 +1301,8 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
                 const fs = fitFontSizeToWidth(leftText, maxW, fs0, measureW, 800, 10);
                 return (
                   <text
+                    data-ggt-label="sample"
+                    data-ggt-row-id={track.id}
                     x={leftLabelX}
                     y={y + h * 0.5}
                     fill={leftFill}
@@ -1331,7 +1312,7 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
                     textAnchor="end"
                     dominantBaseline="middle"
                   >
-                    {truncateToWidth(leftText, maxW, fs, measureW, 800)}
+                    {leftText}
                   </text>
                 );
               })()
@@ -1343,10 +1324,11 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
                   const maxFsByHeight = Math.max(10, Math.floor(h * 0.7));
                   const fs0 = Math.min(rightFontSize, maxFsByHeight);
                   const fs = fitFontSizeToWidth(txt, colW, fs0, measureW, 700, 10);
-                  const shown = truncateToWidth(txt, colW, fs, measureW, 700);
                   return (
                 <text
                   key={`anno-${track.id}-${i}`}
+                  data-ggt-label="annotation"
+                  data-ggt-row-id={track.id}
                   x={(annoColXs[i] ?? annotationAreaX) + colW * 0.5}
                   y={y + h * 0.5}
                   fill={rightFill}
@@ -1356,7 +1338,7 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
                   textAnchor="middle"
                   dominantBaseline="middle"
                 >
-                  {shown}
+                  {txt}
                 </text>
                   );
                 })()
@@ -1364,6 +1346,8 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
             )}
             {circle ? (
               <circle
+                pointerEvents="all"
+                data-ggt-mark-row={track.id}
                 cx={markX}
                 cy={y + h * 0.5}
                 r={circleR}
@@ -1373,7 +1357,7 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
               />
             ) : null}
             {cross ? (
-              <g>
+              <g data-ggt-mark-row={track.id}>
                 <line
                   x1={markX - crossSize * 0.5}
                   x2={markX + crossSize * 0.5}
@@ -1401,9 +1385,11 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
       {renderLegend()}
 
       {renderOverlays("over")}
-      {renderEditorUiGuides()}
-      {renderEditorSelection()}
-      {renderEditorUiHandles()}
+      <g data-export-exclude="true">
+        {renderEditorUiGuides()}
+        {renderEditorSelection()}
+        {renderEditorUiHandles()}
+      </g>
     </svg>
   );
 });

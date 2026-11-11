@@ -2,6 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ServiceQuickLinks } from "./components/ServiceQuickLinks";
 import { GraphicalGenotypeSvg, type EditorUiGuideLine, type EditorUiHandle } from "./GraphicalGenotypeSvg";
+import { getAxisTrackMetrics } from "./axisLabelLayout";
+import { FIGURE_FONT, createCanvasTextMeasurer } from "./textMetrics";
+import { inspectFigureQuality, type FigureQuality } from "./figureQuality";
 import {
   makeConfigFromMatrix,
   markerInfoFromName,
@@ -16,7 +19,7 @@ import {
   type MatrixRow,
   type OverlayShape,
 } from "./ggtTemplates";
-import { downloadJpegFromSvg, downloadSvg } from "./exportImage";
+import { downloadJpegFromSvg, downloadPngFromSvg, downloadSvg, getPublicationDimensions } from "./exportImage";
 import { makeAbhMatrixFromFlapjack, parseFlapjackGenotype, parseFlapjackMap } from "./flapjack";
 import {
   applyImputeAndSmooth,
@@ -877,12 +880,27 @@ export const App: React.FC = () => {
   const [fjCompressRuns, setFjCompressRuns] = useState<boolean>(() => readLocal("ggt_viewer_fj_compress") !== "0");
   const [fjScaleByPos, setFjScaleByPos] = useState<boolean>(() => readLocal("ggt_viewer_fj_scale_pos") !== "0");
 
-  const [exportFormat, setExportFormat] = useState<"svg" | "jpeg">("jpeg");
+  const [exportFormat, setExportFormat] = useState<"svg" | "png" | "jpeg">("png");
+  const [exportPrintSize, setExportPrintSize] = useState(true);
+  const [exportWidthMm, setExportWidthMm] = useState(140);
+  const [exportDpi, setExportDpi] = useState(600);
+  const [exportLockRatio, setExportLockRatio] = useState(true);
   const [exportWidth, setExportWidth] = useState<number>(3840);
   const [exportHeight, setExportHeight] = useState<number>(2160);
   const [jpegQuality, setJpegQuality] = useState<number>(0.95);
   const [baseName, setBaseName] = useState<string>("graphical_genotype");
   const [busy, setBusy] = useState<boolean>(false);
+  const [figureQuality, setFigureQuality] = useState<FigureQuality | null>(null);
+  useEffect(() => {
+    if (tab !== "export" || !exportPrintSize || !svgRef.current) return;
+    let cancelled = false;
+    void document.fonts.ready.then(() => {
+      requestAnimationFrame(() => {
+        if (!cancelled && svgRef.current) setFigureQuality(inspectFigureQuality(svgRef.current, exportWidthMm));
+      });
+    });
+    return () => { cancelled = true; };
+  }, [tab, config, exportPrintSize, exportWidthMm]);
 
   useEffect(() => writeLocal("ggt_viewer_tab", tab), [tab]);
   useEffect(() => writeLocal("ggt_viewer_template", templateId), [templateId]);
@@ -3120,11 +3138,18 @@ export const App: React.FC = () => {
       const s = n.toFixed(n % 1 === 0 ? 0 : 2);
       return s.replace(/(\.\d*?)0+$/g, "$1").replace(/\.$/g, "");
     };
+    const figureFont = FIGURE_FONT;
+    const measureText = createCanvasTextMeasurer(figureFont);
+    const fitAxisHeights = (tracks: GraphTrack[], plotX: number, plotWidth: number): void => {
+      for (const track of tracks) {
+        if (track.axis) track.height = getAxisTrackMetrics(track.axis, plotX, plotWidth, track.height ?? 64, 18, measureText).height;
+      }
+    };
 
     if (opts.figureMode === "fa_zoom") {
       const hotspots: BuilderPreviewHotspot[] = [];
       const width = opts.canvasWidth;
-      const approxTextW = (label: string, fontSize: number): number => label.length * fontSize * 0.62;
+      const approxTextW = (label: string, fontSize: number): number => measureText(label, fontSize, 900);
       const figureTitle = (opts.figureTitle || "").trim();
       const titleTop = 18;
       let titleFontSize = 24;
@@ -3141,9 +3166,8 @@ export const App: React.FC = () => {
             .map((r) => String(r.sample || r.id || "").trim())
             .filter((v) => v.length > 0)
         : [];
-      const maxLeftLen = Math.max(4, chrLabel.length, ...leftNames.map((s) => s.length));
-      const approxLeftW = maxLeftLen * leftFontSize * 0.62;
-      const plotX = opts.leftLabels ? Math.round(Math.min(320, Math.max(160, approxLeftW + 44))) : 140;
+      const approxLeftW = Math.max(measureText(chrLabel, leftFontSize, 800), ...leftNames.map((s) => measureText(s, leftFontSize, 800)));
+      const plotX = opts.leftLabels ? Math.round(Math.max(160, approxLeftW + 44)) : 140;
 
       const annotationWidth = opts.annotationWidth;
       const plotWidth = Math.max(200, width - plotX - annotationWidth - 30);
@@ -3190,14 +3214,6 @@ export const App: React.FC = () => {
 	      const guideOpacity = opts.theme === "light" ? 0.55 : 0.5;
 
 	      const boundaries = Array.isArray(next.xBoundaries) ? next.xBoundaries : [];
-	      const minLabelGapPx = 10;
-
-	      const highlightSet = new Set(
-	        String(opts.highlightMarkers || "")
-	          .split(/,|\s+/g)
-	          .map((v) => v.trim())
-	          .filter((v) => v.length > 0),
-	      );
 
 	      const chrTrack: GraphTrack = {
 	        id: "__chr__",
@@ -3208,48 +3224,16 @@ export const App: React.FC = () => {
 	        leftText: { text: chrLabel, fill: textFill, fontSize: 16 },
 	      };
 
-	      const coarseAxisTopFontSize = 14;
-	      const coarseAxisBottomFontSize = 13;
+	      const coarseAxisTopFontSize = 18;
+	      const coarseAxisBottomFontSize = 17;
 	      const coarseAxisTicks =
 	        coarseMarkers.length >= 2
 	          ? (() => {
-	            const names = coarseMarkers.map((m) => m.name || "");
-	            const posLabels = coarseMarkers.map((m) => fmtPos(m.pos));
-	            const xs = coarseMarkers.map((_, i) => coarseTickX(i));
-	            const widths = names.map((name, i) => Math.max(approxTextW(name, coarseAxisTopFontSize), approxTextW(posLabels[i] || "", coarseAxisBottomFontSize)) + 12);
-	            const perTickPx = plotWidth / Math.max(1, coarseMarkers.length - 1);
-	            const maxW = widths.length ? Math.max(...widths) : 0;
-	            const tickEveryByWidth = Math.max(1, Math.ceil((maxW + minLabelGapPx) / Math.max(1, perTickPx)));
-	            const showFlags = names.map((_, i) => i % tickEveryByWidth === 0 || i === 0 || i === names.length - 1);
-
-	            const overlaps = (a: number, b: number): boolean =>
-	              Math.abs(xs[a] * plotWidth - xs[b] * plotWidth) < (widths[a] + widths[b]) * 0.5 + minLabelGapPx;
-	            const kept: number[] = [];
-	            for (let i = 0; i < showFlags.length; i += 1) {
-	              if (!showFlags[i]) continue;
-	              while (kept.length) {
-	                const j = kept[kept.length - 1];
-	                if (!overlaps(j, i)) break;
-	                // keep endpoints, drop intermediate labels
-	                if (i !== 0 && i !== showFlags.length - 1) {
-	                  showFlags[i] = false;
-	                  break;
-	                }
-	                if (j !== 0 && j !== showFlags.length - 1) {
-	                  showFlags[j] = false;
-	                  kept.pop();
-	                  continue;
-	                }
-	                break;
-	              }
-	              if (showFlags[i]) kept.push(i);
-	            }
-
 	            return coarseMarkers.map((m, i) => ({
-	              x: xs[i],
-	              major: Boolean(showFlags[i]),
-	              labelTop: showFlags[i] ? (m.name || "") : undefined,
-	              labelBottom: showFlags[i] ? fmtPos(m.pos) : undefined,
+	              x: coarseTickX(i),
+	              major: true,
+	              labelTop: m.name || "",
+	              labelBottom: fmtPos(m.pos),
 	            }));
 	          })()
 	          : [
@@ -3276,7 +3260,7 @@ export const App: React.FC = () => {
 	        },
 	      };
 
-	      const detailAxisTopFontSize = markersCount <= 60 ? 14 : markersCount <= 120 ? 13 : 12;
+	      const detailAxisTopFontSize = 18;
 	      const detailAxisBottomFontSize = Math.max(10, detailAxisTopFontSize - 1);
 	      const markerXs =
 	        boundaries.length === markersCount + 1
@@ -3288,55 +3272,21 @@ export const App: React.FC = () => {
 	          : markers.map((_, i) => (i + 0.5) / markersCount);
 	      const markerNames = markers.map((m, i) => (m.name || "").trim() || `m${i + 1}`);
 	      const markerPosLabels = markers.map((m) => (Number.isFinite(m.pos ?? Number.NaN) ? fmtPos(m.pos as number) : ""));
-	      const markerLabelWidths = markerNames.map(
-	        (name, i) => Math.max(approxTextW(name, detailAxisTopFontSize), approxTextW(markerPosLabels[i] || "", detailAxisBottomFontSize)) + 12,
-	      );
-	      const perMarkerPx = plotWidth / Math.max(1, markersCount);
-	      const maxLabelW = markerLabelWidths.length ? Math.max(...markerLabelWidths) : 0;
-	      const tickEveryByCount = markersCount <= 25 ? 1 : markersCount <= 60 ? 2 : markersCount <= 120 ? 4 : 8;
-	      const tickEveryByWidth = Math.max(1, Math.ceil((maxLabelW + minLabelGapPx) / Math.max(1, perMarkerPx)));
-	      const tickEvery = Math.max(tickEveryByCount, tickEveryByWidth);
-
-	      const isMandatoryMarkerLabel = (i: number): boolean => i === 0 || i === markersCount - 1 || highlightSet.has(markerNames[i] || "");
-	      const overlaps = (a: number, b: number): boolean =>
-	        Math.abs(markerXs[a] * plotWidth - markerXs[b] * plotWidth) < (markerLabelWidths[a] + markerLabelWidths[b]) * 0.5 + minLabelGapPx;
-
-	      const showFlags = markerNames.map((name, i) => i % tickEvery === 0 || i === 0 || i === markersCount - 1 || highlightSet.has(name));
-	      const kept: number[] = [];
-	      for (let i = 0; i < showFlags.length; i += 1) {
-	        if (!showFlags[i]) continue;
-	        const mandatory = isMandatoryMarkerLabel(i);
-	        while (kept.length) {
-	          const j = kept[kept.length - 1];
-	          if (!overlaps(j, i)) break;
-	          const prevMandatory = isMandatoryMarkerLabel(j);
-	          if (mandatory && !prevMandatory) {
-	            showFlags[j] = false;
-	            kept.pop();
-	            continue;
-	          }
-	          if (!mandatory) showFlags[i] = false;
-	          break;
-	        }
-	        if (showFlags[i]) kept.push(i);
-	      }
-
 		      const detailTicks = markers.map((m, i) => {
-		        const show = Boolean(showFlags[i]);
 		        const name = markerNames[i] || `m${i + 1}`;
 		        return {
 		          x: markerXs[i],
-		          major: show,
-		          labelTop: show ? name : undefined,
+		          major: true,
+		          labelTop: name,
 		          // highlight marker is mandatory for label visibility, but keep text color fixed (black) for paper figures
-		          labelBottom: show ? markerPosLabels[i] : undefined,
+		          labelBottom: markerPosLabels[i],
 		        };
 		      });
 
 	      const detailAxisTrack: GraphTrack = {
 	        id: "__detail_axis__",
         height: 74,
-        gapAfter: 14,
+        gapAfter: 42,
         showColumnLines: opts.guides,
         segments: [],
 	        axis: {
@@ -3355,6 +3305,7 @@ export const App: React.FC = () => {
       const tracks: GraphTrack[] = showAxes
         ? [chrTrack, ...(showCoarseAxis ? [coarseAxisTrack] : []), detailAxisTrack, ...baseTracks]
         : [chrTrack, ...baseTracks];
+      fitAxisHeights(tracks, plotX, plotWidth);
 
       const layout: Array<{ id: string; y: number; h: number }> = [];
       let yCursor = plotY;
@@ -3493,6 +3444,8 @@ export const App: React.FC = () => {
           { code: "A", label: legendA || "A" },
           { code: "B", label: legendB || "B" },
           { code: "H", label: legendH || "H" },
+          ...(snap.rows.some((row) => row.codes.includes("-"))
+            ? [{ code: "-" as BuilderCode, label: "未判定" }] : []),
         ] satisfies Array<{ code: BuilderCode; label: string }>
       ).filter((v) => v.label.trim().length > 0);
 
@@ -3527,7 +3480,7 @@ export const App: React.FC = () => {
         for (const it of genoLegendItems) {
           const label = it.label.trim();
           if (!label) continue;
-          const denom = label.length * 0.62;
+          const denom = approxTextW(label, 16) / 16;
           if (denom <= 0) continue;
           const maxFs = Math.floor((maxLegendLineW - 18) / denom);
           if (Number.isFinite(maxFs)) best = Math.min(best, maxFs);
@@ -3551,14 +3504,7 @@ export const App: React.FC = () => {
         return lum > 0.6 ? "#111827" : "#f9fafb";
       };
 
-      const fitLegendLabel = (label: string): string => {
-        const t = label.trim();
-        if (!t) return "";
-        const maxChars = Math.max(1, Math.floor((maxLegendLineW - 18) / Math.max(1, legendFontSize * 0.62)));
-        if (t.length <= maxChars) return t;
-        return `${t.slice(0, Math.max(1, maxChars - 1))}…`;
-      };
-      const fittedLegendItems = genoLegendItems.map((it) => ({ ...it, label: fitLegendLabel(it.label) })).filter((it) => it.label.trim().length > 0);
+      const fittedLegendItems = genoLegendItems;
 
       const legendItemWidth = (label: string): number => Math.max(92, Math.round(18 + approxTextW(label, legendFontSize)));
       const legendLineWidth = (items: typeof fittedLegendItems): number =>
@@ -3588,7 +3534,7 @@ export const App: React.FC = () => {
       const legendHeight = legendLines.length ? legendLines.length * legendBoxH + (legendLines.length - 1) * legendGapY : 0;
 
       const baseArrowGap = Math.max(44, Math.round(opts.rowHeight * 1.15));
-      const arrowGap = Math.max(baseArrowGap, legendHeight ? legendHeight + 20 : baseArrowGap);
+      const arrowGap = Math.max(baseArrowGap, 80);
       const arrowY = dataBottom + arrowGap;
       const arrowY0 = arrowY + arrowOffsetY;
       const arrowX0 = ax0 + arrowOffsetX;
@@ -3598,7 +3544,7 @@ export const App: React.FC = () => {
       const arrowLabelY = arrowY0 + 18 + arrowLabelDy;
       const geneLabelY = Math.round(arrowY0 - 38 - 12);
 
-      const legendTop = legendHeight ? Math.round(arrowY - 10 - legendHeight) : 0;
+      const legendTop = legendHeight ? Math.ceil(Math.max(arrowY0 + 20, arrowLabelY + 22, geneLabelY + 46) + 24) : 0;
       const genoLegendOverlays = (() => {
         if (!legendLines.length) return [] as OverlayShape[];
         const out: OverlayShape[] = [];
@@ -3990,7 +3936,7 @@ export const App: React.FC = () => {
       const mergedOverlays: OverlayShape[] = userOverlays.length ? [...overlays, ...userOverlays] : overlays;
 
       const scaleBottom = arrowLabel ? arrowLabelY + 16 : arrowY0 + 10;
-      const height = Math.max(520, Math.ceil(scaleBottom + 44));
+      const height = Math.max(520, Math.ceil(scaleBottom + 44), legendTop + legendHeight + 24);
 
       return {
         ...next,
@@ -4002,7 +3948,7 @@ export const App: React.FC = () => {
         plot: { x: plotX, y: plotY, width: plotWidth, annotationWidth, annotationColumnWidths: annoColWidths, rowHeight: opts.rowHeight, rowGap: opts.rowGap },
         styles: {
           columnLine: { stroke: guideStroke, strokeWidth: 1, dash: "2 4", opacity: guideOpacity },
-          text: { fontFamily: 'Arial, "Segoe UI", system-ui, -apple-system, sans-serif', fontSize: 18, fill: textFill },
+          text: { fontFamily: figureFont, fontSize: 18, fill: textFill },
           segment: { stroke: "none", strokeWidth: 0 },
         },
 	        guides: opts.guides ? { show: true, mode: opts.guideMode, stroke: guideStroke, strokeWidth: 1, dash: "2 4", opacity: guideOpacity } : undefined,
@@ -4016,7 +3962,7 @@ export const App: React.FC = () => {
     }
 
     const plotY = next.plot?.y ?? 92;
-    const plotX = next.plot?.x ?? 120;
+    const plotX = Math.max(120, Math.ceil(Math.max(0, ...baseTracks.map((track) => measureText(track.leftText?.text || "", track.leftText?.fontSize ?? 16, 800))) + 32));
     const plotWidth =
       Number.isFinite(next.plot?.width ?? Number.NaN) ? (next.plot?.width as number) : Math.max(200, opts.canvasWidth - plotX - opts.annotationWidth - 30);
 
@@ -4026,7 +3972,7 @@ export const App: React.FC = () => {
           {
             id: "__marker_axis__",
             height: 64,
-            gapAfter: 10,
+            gapAfter: 42,
             showColumnLines: opts.guides,
             segments: [],
             axis: {
@@ -4036,21 +3982,18 @@ export const App: React.FC = () => {
               tickSize: 20,
               labelTopFill: textFill,
               labelBottomFill: textFill,
-              labelTopFontSize: 13,
-              labelBottomFontSize: 12,
+              labelTopFontSize: 18,
+              labelBottomFontSize: 17,
               ticks: markers.map((m, i) => {
                 const x0 = next.xBoundaries?.[i] ?? i / markersCount;
                 const x1 = next.xBoundaries?.[i + 1] ?? (i + 1) / markersCount;
                 const x = (x0 + x1) / 2;
-                const n = markersCount;
-                const every = n <= 25 ? 1 : n <= 60 ? 2 : n <= 120 ? 4 : 8;
-                const show = i % every === 0 || i === 0 || i === n - 1;
                 const pos = Number.isFinite(m.pos ?? Number.NaN) ? fmtPos(m.pos as number) : "";
                 return {
                   x,
-                  major: show,
-                  labelTop: show ? (m.name || `m${i + 1}`) : undefined,
-                  labelBottom: show ? pos : undefined,
+                  major: true,
+                  labelTop: m.name || `m${i + 1}`,
+                  labelBottom: pos,
                 };
               }),
             },
@@ -4059,6 +4002,7 @@ export const App: React.FC = () => {
         : [];
 
     const tracks = [...axisTracks, ...baseTracks];
+    fitAxisHeights(tracks, plotX, plotWidth);
 
     const layout: Array<{ id: string; y: number; h: number; isData: boolean }> = [];
     let yCursor = plotY;
@@ -4082,7 +4026,11 @@ export const App: React.FC = () => {
         layer: "over",
       }));
 
-    const height = Math.max(320, yCursor + 60);
+    const legendY = yCursor + 30;
+    const legendFontSize = next.legend?.fontSize ?? 14;
+    const legendHeight = next.legend ? 20 + (next.legend.title ? Math.ceil(legendFontSize * 1.05 * 1.25) + 14 : 0)
+      + next.legend.items.length * (Math.max(14, Math.ceil(legendFontSize * 1.35)) + 8) : 0;
+    const height = Math.max(320, legendY + legendHeight + 24);
     const userOverlays = builderUserOverlaysRef.current || [];
     const overlays = [...(Array.isArray(next.overlays) ? next.overlays : []), ...barFrames, ...userOverlays];
 
@@ -4090,6 +4038,7 @@ export const App: React.FC = () => {
       ...next,
       width: opts.canvasWidth,
       height,
+      legend: next.legend ? { ...next.legend, x: plotX, y: legendY } : undefined,
       plot: {
         x: plotX,
         y: plotY,
@@ -4099,7 +4048,7 @@ export const App: React.FC = () => {
         rowHeight: opts.rowHeight,
         rowGap: opts.rowGap,
       },
-      styles: { ...(next.styles || {}), segment: { stroke: "none", strokeWidth: 0 } },
+      styles: { ...(next.styles || {}), text: { ...next.styles?.text, fontFamily: figureFont }, segment: { stroke: "none", strokeWidth: 0 } },
       guides: opts.guides ? { show: true, mode: opts.guideMode } : undefined,
       annotationHeaders:
         (annoHeaderLeft || "").trim() || (opts.headerRight || "").trim()
@@ -4230,6 +4179,28 @@ export const App: React.FC = () => {
   };
 
   const pickBuilderPreviewHitFromSvgPoint = (clientX: number, clientY: number): BuilderPreviewHit | null => {
+    const node = document.elementFromPoint(clientX, clientY);
+    const marker = node?.closest("[data-ggt-marker-index]");
+    if (marker && svgRef.current?.contains(marker)) {
+      const index = Number(marker.getAttribute("data-ggt-marker-index"));
+      const coarse = marker.getAttribute("data-ggt-track-id") === "__coarse_axis__";
+      const position = marker.getAttribute("data-ggt-label") === "marker-position";
+      if (Number.isInteger(index) && index >= 0) {
+        return { kind: "canvasEdit", target: coarse
+          ? { kind: position ? "coarseMarkerPos" : "coarseMarkerName", mIdx: index }
+          : { kind: position ? "detailMarkerPos" : "detailMarkerName", cIdx: index } };
+      }
+    }
+    const mark = node?.closest("[data-ggt-mark-row]");
+    if (mark && svgRef.current?.contains(mark)) {
+      const rIdx = builderRows.findIndex((row) => row.id === mark.getAttribute("data-ggt-mark-row"));
+      if (rIdx >= 0) return { kind: "mark", rIdx };
+    }
+    const rowLabel = node?.closest("[data-ggt-row-id]");
+    if (rowLabel && svgRef.current?.contains(rowLabel)) {
+      const rIdx = builderRows.findIndex((row) => row.id === rowLabel.getAttribute("data-ggt-row-id"));
+      if (rIdx >= 0) return { kind: rowLabel.getAttribute("data-ggt-label") === "sample" ? "leftLabel" : "rightLabel", rIdx };
+    }
     const pt = builderSvgPointFromClient(clientX, clientY);
     if (!pt) return null;
     const x = pt.x;
@@ -4300,7 +4271,7 @@ export const App: React.FC = () => {
 	      while (last >= 0 && !String(cols[last] ?? "").trim()) last -= 1;
 	      return cols.slice(0, last + 1);
 	    };
-	    const approxTextW = (label: string, fontSize: number): number => Math.max(0, Math.round(label.length * fontSize * 0.62));
+	    const approxTextW = createCanvasTextMeasurer(config.styles?.text?.fontFamily || FIGURE_FONT);
 	    const annotationAreaX = plotX + plotWidth + 24;
 	    const defaultTextFs = (config.styles?.text?.fontSize ?? 18) as number;
 	    const headerFontSize = (config.annotationHeaders?.fontSize ?? Math.max(12, Math.round(defaultTextFs * 0.85))) as number;
@@ -4329,7 +4300,7 @@ export const App: React.FC = () => {
 	      }
 	    }
 	    if (showMarkColumn) maxMarkHalf = Math.max(maxMarkHalf, 20);
-	    const markColW = showMarkColumn ? Math.max(44, Math.round(maxMarkHalf * 2 + 10)) : 0;
+	    const markColW = showMarkColumn ? Math.max(44, Math.round(maxMarkHalf * 2 + 10), approxTextW(config.annotationHeaders?.right || "", headerFontSize, 900) + 8) : 0;
 
 	    const desiredColWs: number[] = Array.from({ length: annotationCols }, () => 0);
 	    for (let i = 0; i < annotationCols; i += 1) {
@@ -5326,23 +5297,106 @@ export const App: React.FC = () => {
     if (!svgRef.current) return;
     setBusy(true);
     try {
+      const size = exportPrintSize
+        ? getPublicationDimensions({ widthMm: exportWidthMm, dpi: exportDpi, sourceWidth: config.width, sourceHeight: config.height })
+        : { width: exportWidth, height: exportLockRatio ? Math.round(exportWidth * config.height / config.width) : exportHeight };
       if (exportFormat === "svg") {
-        downloadSvg(svgRef.current, { baseName, width: exportWidth, height: exportHeight });
+        await downloadSvg(svgRef.current, { baseName, ...size, widthMm: exportPrintSize ? exportWidthMm : undefined });
         return;
       }
-      await downloadJpegFromSvg(svgRef.current, {
+      const rasterOptions = {
         baseName,
-        width: exportWidth,
-        height: exportHeight,
+        ...size,
+        dpi: exportPrintSize ? exportDpi : undefined,
         quality: jpegQuality,
-      });
+      };
+      if (exportFormat === "png") await downloadPngFromSvg(svgRef.current, rasterOptions);
+      else await downloadJpegFromSvg(svgRef.current, rasterOptions);
+      setMessage("図を保存しました。");
+    } catch (e) {
+      setMessage(`書き出しエラー: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setBusy(false);
     }
   };
 
+  const exportSize = useMemo(() => {
+    try {
+      return exportPrintSize
+        ? getPublicationDimensions({ widthMm: exportWidthMm, dpi: exportDpi, sourceWidth: config.width, sourceHeight: config.height })
+        : { width: exportWidth, height: exportLockRatio ? Math.round(exportWidth * config.height / config.width) : exportHeight };
+    } catch {
+      return null;
+    }
+  }, [exportPrintSize, exportWidthMm, exportDpi, config.width, config.height, exportWidth, exportHeight, exportLockRatio]);
+
+  const setPublicationExport = (): void => {
+    setExportFormat("png");
+    setExportPrintSize(true);
+    setExportWidthMm(140);
+    setExportDpi(600);
+    setExportLockRatio(true);
+  };
+
+  const setPublicationBuilder = (): void => {
+    const measure = createCanvasTextMeasurer(FIGURE_FONT);
+    const columns = builderAnnoCols.filter((column) => column.visible);
+    const widths = columns.map((column) => Math.max(50, measure(column.header, 16, 900) + 12));
+    const markWidth = Math.max(50, measure(builderHeaderRight, 16, 900) + 12);
+    const annotationWidth = widths.reduce((sum, width) => sum + width, 0) + Math.max(0, widths.length - 1) * 12 + markWidth + 18;
+    setBuilderTheme("light");
+    setBuilderPaletteId("paper_blue_yellow");
+    setBuilderCanvasWidth(Math.max(900, annotationWidth + 550));
+    setBuilderAnnotationWidth(annotationWidth);
+    setBuilderAnnoCols((previous) => previous.map((column) => ({ ...column, width: 0 })));
+    setBuilderRowHeight(28);
+    setBuilderRowGap(12);
+    setBuilderLeftLabels(true);
+    setBuilderShowMarkerAxis(true);
+    setPublicationExport();
+    setMessage("論文用の白背景・配色・余白と印刷設定を適用しました。原稿での文字サイズを確認してください。");
+  };
+
+  const saveFigureProject = (): void => {
+    const project = {
+      format: "matrix-block-canvas-figure",
+      version: 1,
+      baseName,
+      config,
+      exportSettings: { format: exportFormat, printSize: exportPrintSize, widthMm: exportWidthMm, dpi: exportDpi, lockRatio: exportLockRatio, width: exportWidth, height: exportHeight, jpegQuality },
+    };
+    downloadTextFile(prettyJson(project), `${safeFileBase(baseName)}_figure.json`, "application/json;charset=utf-8");
+  };
+
+  const loadFigureProject = async (file: File): Promise<void> => {
+    try {
+      const project = JSON.parse(await readFileAsText(file));
+      const next = project?.config as GraphConfig;
+      if (project?.format !== "matrix-block-canvas-figure" || project.version !== 1 || !next || !Array.isArray(next.tracks)
+        || !Number.isFinite(next.width) || next.width <= 0 || !Number.isFinite(next.height) || next.height <= 0) {
+        throw new Error("このアプリで保存した図設定JSONを選んでください。");
+      }
+      applyConfig(next);
+      setMatrixData(null);
+      setBaseName(String(project.baseName || "graphical_genotype"));
+      const settings = project.exportSettings || {};
+      if (["svg", "png", "jpeg"].includes(settings.format)) setExportFormat(settings.format);
+      setExportPrintSize(settings.printSize !== false);
+      setExportLockRatio(settings.lockRatio !== false);
+      if (Number.isFinite(settings.widthMm) && settings.widthMm > 0) setExportWidthMm(settings.widthMm);
+      if (Number.isFinite(settings.dpi) && settings.dpi > 0) setExportDpi(settings.dpi);
+      if (Number.isFinite(settings.width) && settings.width > 0) setExportWidth(settings.width);
+      if (Number.isFinite(settings.height) && settings.height > 0) setExportHeight(settings.height);
+      if (Number.isFinite(settings.jpegQuality)) setJpegQuality(Math.max(0.1, Math.min(1, settings.jpegQuality)));
+      setMessage(`図設定を読み込みました: ${file.name}`);
+    } catch (e) {
+      setMessage(`図設定エラー: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
   const setExportToConfigSize = (): void => {
     if (!Number.isFinite(config.width) || !Number.isFinite(config.height)) return;
+    setExportPrintSize(false);
     setExportWidth(Math.max(1, Math.floor(config.width)));
     setExportHeight(Math.max(1, Math.floor(config.height)));
   };
@@ -5354,7 +5408,7 @@ export const App: React.FC = () => {
     if (tab === "flapjack") return { title: "Flapjack Import", desc: "MAP+GENOTYPE を貼り付け、親A/親B基準で ABH へ変換します。" };
     if (tab === "template") return { title: "Templates", desc: "見た目の雛形を選んで編集の起点にします。" };
     if (tab === "ops") return { title: "操作", desc: "平滑化/欠測補完/並び替えなどを GUI で適用します。" };
-    if (tab === "export") return { title: "Export", desc: "SVG / JPEG（4Kなど）で保存します。" };
+    if (tab === "export") return { title: "Export", desc: "印刷幅と解像度を指定し、SVG / PNG / JPEG で保存します。" };
     return { title: "Advanced", desc: "JSON を直接編集して細かく調整します。" };
   }, [tab]);
 
@@ -6308,7 +6362,7 @@ export const App: React.FC = () => {
                       <button type="button" className="seq-button secondary" onClick={() => setTab("export")}>
                         Export へ
                       </button>
-                      <button type="button" className="seq-button secondary" onClick={() => (setExportWidth(3840), setExportHeight(2160), setTab("export"))}>
+                      <button type="button" className="seq-button secondary" onClick={() => (setExportPrintSize(false), setExportLockRatio(true), setExportWidth(3840), setTab("export"))}>
                         4K で保存
                       </button>
                     </div>
@@ -6415,6 +6469,11 @@ export const App: React.FC = () => {
                       </label>
                     </div>
 
+                    <div className="ggt-actions">
+                      <button type="button" className="seq-button secondary" onClick={setPublicationBuilder}>
+                        論文用に整える
+                      </button>
+                    </div>
                     <details className="ggt-details">
                       <summary>レイアウト詳細</summary>
                       <div className="ggt-row" style={{ marginTop: 8 }}>
@@ -8550,20 +8609,52 @@ export const App: React.FC = () => {
                     </label>
                     <label className="seq-label">
                       <span>形式</span>
-                      <select className="ggt-select" value={exportFormat} onChange={(e) => setExportFormat(e.target.value as "svg" | "jpeg")}>
+                      <select aria-label="形式" className="ggt-select" value={exportFormat} onChange={(e) => setExportFormat(e.target.value as "svg" | "png" | "jpeg")}>
+                        <option value="png">PNG（論文用・可逆圧縮）</option>
                         <option value="jpeg">JPEG</option>
                         <option value="svg">SVG</option>
                       </select>
                     </label>
+                  </div>
+                  <label className="ggt-muted">
+                    <input type="checkbox" checked={exportPrintSize} onChange={(e) => setExportPrintSize(e.target.checked)} />
+                    印刷寸法で指定
+                  </label>
+                  {exportPrintSize ? (
+                    <div className="ggt-row">
+                      <label className="seq-label">
+                        <span>印刷幅(mm)</span>
+                        <input className="seq-input" type="number" min={1} step={1} value={exportWidthMm} onChange={(e) => setExportWidthMm(Number(e.target.value))} />
+                      </label>
+                      <label className="seq-label">
+                        <span>解像度(dpi)</span>
+                        <input className="seq-input" type="number" min={72} max={2400} step={1} value={exportDpi} onChange={(e) => setExportDpi(Number(e.target.value))} />
+                      </label>
+                    </div>
+                  ) : (
+                  <div className="ggt-row">
                     <label className="seq-label">
                       <span>幅(px)</span>
                       <input className="seq-input" type="number" min={1} value={exportWidth} onChange={(e) => setExportWidth(Number(e.target.value))} />
                     </label>
                     <label className="seq-label">
                       <span>高さ(px)</span>
-                      <input className="seq-input" type="number" min={1} value={exportHeight} onChange={(e) => setExportHeight(Number(e.target.value))} />
+                      <input className="seq-input" type="number" min={1} disabled={exportLockRatio} value={exportSize?.height ?? exportHeight} onChange={(e) => setExportHeight(Number(e.target.value))} />
                     </label>
                   </div>
+                  )}
+                  <label className="ggt-muted">
+                    <input type="checkbox" checked={exportPrintSize || exportLockRatio} disabled={exportPrintSize} onChange={(e) => setExportLockRatio(e.target.checked)} />
+                    縦横比を固定
+                  </label>
+                  <div className="ggt-help" aria-live="polite">
+                    {exportSize ? `${exportSize.width} × ${exportSize.height} px${exportPrintSize ? ` / 幅 ${exportWidthMm} mm・${exportDpi} dpi` : ""}` : "印刷幅と解像度には有効な正の値を入力してください。"}
+                  </div>
+                  {exportPrintSize && figureQuality ? <div className="ggt-help" aria-live="polite">
+                    図チェック: 最小文字 {figureQuality.minFontPt.toFixed(1)} pt / 範囲外 {figureQuality.clipped} / 文字の重なり {figureQuality.overlaps}
+                    {figureQuality.minFontPt > 0 && figureQuality.minFontPt < 6.5 ? "。文字が小さいため、Canvas幅を狭めるか、図を分割してください。" : ""}
+                    {figureQuality.clipped || figureQuality.overlaps ? "。ラベルや余白を調整し、保存画像を確認してください。" : ""}
+                  </div> : null}
 
                   {exportFormat === "jpeg" ? (
                     <label className="seq-label">
@@ -8573,20 +8664,31 @@ export const App: React.FC = () => {
                   ) : null}
 
                   <div className="ggt-actions">
-                    <button type="button" className="seq-button secondary" onClick={() => (setExportWidth(3840), setExportHeight(2160))}>
-                      4K (3840x2160)
+                    <button type="button" className="seq-button secondary" onClick={setPublicationExport}>
+                      論文用（140mm・600dpi）
                     </button>
-                    <button type="button" className="seq-button secondary" onClick={() => (setExportWidth(1920), setExportHeight(1080))}>
-                      1080p (1920x1080)
+                    <button type="button" className="seq-button secondary" onClick={() => (setExportPrintSize(false), setExportLockRatio(true), setExportWidth(3840))}>
+                      幅3840px
+                    </button>
+                    <button type="button" className="seq-button secondary" onClick={() => (setExportPrintSize(false), setExportLockRatio(true), setExportWidth(1920))}>
+                      幅1920px
                     </button>
                     <button type="button" className="seq-button secondary" onClick={setExportToConfigSize}>
                       SVGサイズに合わせる ({Math.floor(config.width)}x{Math.floor(config.height)})
                     </button>
-                    <button type="button" className="seq-button" onClick={doExport} disabled={busy}>
+                    <button type="button" className="seq-button" onClick={doExport} disabled={busy || !exportSize}>
                       {busy ? "書き出し中..." : "保存"}
                     </button>
                   </div>
-                  <div className="ggt-muted">保存できない場合は、まず SVG で保存 → 画像変換ツールで JPEG/PNG 化も可能です。</div>
+                  <div className="ggt-help">PNGは白背景で保存し、印刷幅の情報を含めます。SVGは文字を編集できますが、別のPCではフォントの字形が変わることがあります。原稿へ配置した後も文字の大きさを確認してください。</div>
+                  <div className="ggt-actions">
+                    <button type="button" className="seq-button secondary" onClick={saveFigureProject}>図設定JSONを保存</button>
+                    <label className="seq-label">
+                      <span>図設定JSONを読み込む</span>
+                      <input type="file" accept=".json,application/json" onChange={(e) => { const file = e.target.files?.[0]; if (file) void loadFigureProject(file); e.target.value = ""; }} />
+                    </label>
+                  </div>
+                  <div className="ggt-muted">図設定JSONには現在の描画と印刷設定を保存します。Builderで編集を続ける場合はBuilder projectも保存してください。</div>
                 </div>
               ) : null}
 
