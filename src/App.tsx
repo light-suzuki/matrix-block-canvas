@@ -5,6 +5,7 @@ import { GraphicalGenotypeSvg, type EditorUiGuideLine, type EditorUiHandle } fro
 import { getAxisTrackMetrics } from "./axisLabelLayout";
 import { FIGURE_FONT, createCanvasTextMeasurer } from "./textMetrics";
 import { inspectFigureQuality, type FigureQuality } from "./figureQuality";
+import { makeThesisFigure } from "./thesisFigure";
 import {
   makeConfigFromMatrix,
   markerInfoFromName,
@@ -38,10 +39,21 @@ import { readLocal, writeLocal } from "./utils/storage";
 type TabKey = "quick" | "builder" | "tsv" | "flapjack" | "template" | "ops" | "export" | "advanced";
 type BuilderCode = "A" | "B" | "H" | "-";
 type BuilderMark = "none" | "circle" | "cross";
-type BuilderRow = { id: string; sample: string; rightLabel: string; annotations: string[]; labelRed: boolean; mark: BuilderMark; codes: BuilderCode[] };
+type BuilderRow = { id: string; sample: string; rightLabel: string; annotations: string[]; labelRed: boolean; bold?: boolean; mark: BuilderMark; codes: BuilderCode[] };
 type BuilderAnnoCol = { id: string; header: string; visible: boolean; width: number };
 type BuilderEditMode = "grid" | "preview";
-type BuilderFigureMode = "simple" | "fa_zoom";
+type BuilderFigureMode = "simple" | "fa_zoom" | "thesis";
+type ThesisSettings = { parentRows: number; geneMarker: string; geneLabel: string; candidateEnabled: boolean; positionDecimals: number; fontPt: number; rowPitchMm: number; widthMm: number };
+const DEFAULT_THESIS_SETTINGS: ThesisSettings = { parentRows: 2, geneMarker: "", geneLabel: "", candidateEnabled: false, positionDecimals: 3, fontPt: 7.5, rowPitchMm: 3.6, widthMm: 140 };
+const normalizeThesisSettings = (raw: Partial<ThesisSettings>): ThesisSettings => {
+  const bounded = (value: unknown, fallback: number, min: number, max: number): number => {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : fallback;
+  };
+  return { parentRows: Math.round(bounded(raw.parentRows, 2, 0, 1000)), geneMarker: String(raw.geneMarker ?? ""), geneLabel: String(raw.geneLabel ?? ""),
+    candidateEnabled: raw.candidateEnabled === true, positionDecimals: Math.round(bounded(raw.positionDecimals, 3, 0, 8)),
+    fontPt: bounded(raw.fontPt, 7.5, 5, 16), rowPitchMm: bounded(raw.rowPitchMm, 3.6, 2.5, 12), widthMm: bounded(raw.widthMm, 140, 80, 500) };
+};
 type BuilderZoomStages = 1 | 2;
 type BuilderTool = "brush" | "cycle";
 type BuilderObjectTool = "select" | "text" | "rect" | "line" | "arrow";
@@ -251,6 +263,7 @@ export const App: React.FC = () => {
   const [configTextStale, setConfigTextStale] = useState<boolean>(false);
   const [message, setMessage] = useState<string>("");
   const [jsonError, setJsonError] = useState<string>("");
+  const [builderRenderError, setBuilderRenderError] = useState("");
 
   const [matrixData, setMatrixData] = useState<MatrixData | null>(null);
 
@@ -349,7 +362,7 @@ export const App: React.FC = () => {
           const chr = String(mm?.chr ?? "").trim() || undefined;
           const posNum = Number((mm as { pos?: unknown })?.pos);
           const pos = Number.isFinite(posNum) ? posNum : undefined;
-          return { name, chr, pos };
+          return { name, chr, pos, ...(typeof mm.label === "string" ? { label: mm.label } : {}), ...(mm.bold ? { bold: true } : {}) };
         })
         .filter((m) => m.name.trim().length > 0);
       if (!parsed.length) return fallback;
@@ -435,8 +448,13 @@ export const App: React.FC = () => {
   const [builderFigureMode, setBuilderFigureMode] = useState<BuilderFigureMode>(() => {
     const raw = readLocal("ggt_viewer_builder_fig_mode");
     if (raw === null) return "fa_zoom";
-    return raw === "fa_zoom" ? "fa_zoom" : "simple";
+    return raw === "thesis" ? "thesis" : raw === "fa_zoom" ? "fa_zoom" : "simple";
   });
+  const [builderThesisSettings, setBuilderThesisSettings] = useState<ThesisSettings>(() => {
+    try { return normalizeThesisSettings(JSON.parse(readLocal("ggt_viewer_thesis_settings") || "{}")); }
+    catch { return { ...DEFAULT_THESIS_SETTINGS }; }
+  });
+  useEffect(() => writeLocal("ggt_viewer_thesis_settings", JSON.stringify(builderThesisSettings)), [builderThesisSettings]);
   const [builderChrLabel, setBuilderChrLabel] = useState<string>(() => readLocal("ggt_viewer_builder_chr_label") || "Block 1");
   const [builderChrLenMb, setBuilderChrLenMb] = useState<number>(() => {
     const n = Number(readLocal("ggt_viewer_builder_chr_len_mb"));
@@ -1014,6 +1032,7 @@ export const App: React.FC = () => {
   useEffect(() => writeLocal("ggt_viewer_fj_scale_pos", fjScaleByPos ? "1" : "0"), [fjScaleByPos]);
 
   const applyConfig = (next: GraphConfig, sourceId?: string, opts?: { silent?: boolean; syncText?: boolean }): void => {
+    setBuilderRenderError("");
     if (sourceId && templates.some((t) => t.id === sourceId)) setTemplateId(sourceId);
     setConfig(next);
     if (opts?.syncText === false) {
@@ -1037,7 +1056,7 @@ export const App: React.FC = () => {
   const applyJson = (): void => {
     try {
       const next = JSON.parse(configText) as GraphConfig;
-      setConfig(next);
+      applyConfig(next);
       setJsonError("");
       setConfigTextStale(false);
       setMessage("JSON を反映しました。");
@@ -1133,7 +1152,7 @@ export const App: React.FC = () => {
         const chr = String(m?.chr ?? "").trim() || undefined;
         const posNum = Number((m as { pos?: unknown })?.pos);
         const pos = Number.isFinite(posNum) ? posNum : undefined;
-        return { name, chr, pos };
+        return { name, chr, pos, ...(typeof m.label === "string" ? { label: m.label } : {}), ...(m.bold ? { bold: true } : {}) };
       });
       while (out.length < next) out.push({ name: `m${out.length + 1}`, chr: undefined, pos: undefined });
       return out;
@@ -1201,6 +1220,8 @@ export const App: React.FC = () => {
     annoCols: BuilderAnnoCol[];
     headerLeft: string;
     headerRight: string;
+    figureMode: BuilderFigureMode;
+    thesisSettings: ThesisSettings;
   };
 
   const cloneBuilderRows = (rows: BuilderRow[]): BuilderRow[] =>
@@ -1210,6 +1231,7 @@ export const App: React.FC = () => {
       rightLabel: r.rightLabel,
       annotations: [...(Array.isArray(r.annotations) ? r.annotations : [])],
       labelRed: Boolean(r.labelRed),
+      bold: r.bold,
       mark: r.mark,
       codes: [...r.codes],
     }));
@@ -1256,6 +1278,7 @@ export const App: React.FC = () => {
     headerRight: string;
     posUnit: string;
     figureMode: BuilderFigureMode;
+    thesisSettings: ThesisSettings;
     chrLabel: string;
     chrLenMb: number;
     coarseMarkersDraft: string;
@@ -1296,6 +1319,7 @@ export const App: React.FC = () => {
     headerRight: builderHeaderRight,
     posUnit: builderPosUnit,
     figureMode: builderFigureMode,
+    thesisSettings: builderThesisSettings,
     chrLabel: builderChrLabel,
     chrLenMb: builderChrLenMb,
     coarseMarkersDraft: builderCoarseMarkersDraft,
@@ -1338,6 +1362,7 @@ export const App: React.FC = () => {
       headerRight: builderHeaderRight,
       posUnit: builderPosUnit,
       figureMode: builderFigureMode,
+      thesisSettings: builderThesisSettings,
       chrLabel: builderChrLabel,
       chrLenMb: builderChrLenMb,
       coarseMarkersDraft: builderCoarseMarkersDraft,
@@ -1379,6 +1404,7 @@ export const App: React.FC = () => {
     builderHeaderRight,
     builderPosUnit,
     builderFigureMode,
+    builderThesisSettings,
     builderChrLabel,
     builderChrLenMb,
     builderCoarseMarkersDraft,
@@ -1418,6 +1444,8 @@ export const App: React.FC = () => {
     annoCols: cloneAnnoCols(builderAnnoCols),
     headerLeft: builderHeaderLeft,
     headerRight: builderHeaderRight,
+    figureMode: builderFigureMode,
+    thesisSettings: { ...builderThesisSettings },
   });
 
   const pushUndo = (snap: BuilderSnapshot): void => {
@@ -1452,7 +1480,7 @@ export const App: React.FC = () => {
           const chr = String(m?.chr ?? "").trim() || undefined;
           const posNum = Number((m as { pos?: unknown })?.pos);
           const pos = Number.isFinite(posNum) ? posNum : undefined;
-          return { name, chr, pos };
+          return { name, chr, pos, ...(m.label ? { label: m.label } : {}), ...(m.bold ? { bold: true } : {}) };
         })
         .slice(0, markers);
     while (meta.length < markers) meta.push({ name: `m${meta.length + 1}`, chr: undefined, pos: undefined });
@@ -1464,6 +1492,8 @@ export const App: React.FC = () => {
     setBuilderMarkerMeta(meta);
     setBuilderScaleByPos(Boolean(snap.scaleByPosition));
     setBuilderUserOverlays(Array.isArray(snap.userOverlays) ? cloneOverlays(snap.userOverlays) : []);
+    setBuilderFigureMode(snap.figureMode);
+    setBuilderThesisSettings({ ...snap.thesisSettings });
   };
 
   const doUndoBuilder = (): void => {
@@ -2084,7 +2114,7 @@ export const App: React.FC = () => {
       const cIdx = typeof edit.cIdx === "number" ? edit.cIdx : -1;
       if (cIdx >= 0 && cIdx < builderMarkers) {
         const cur = String(builderMarkerMeta[cIdx]?.name ?? "").trim() || `m${cIdx + 1}`;
-        if (cur !== value) withBuilderUndo(() => setBuilderMarkerName(cIdx, value));
+        if (cur !== value) withBuilderUndo(() => setBuilderMarkerName(cIdx, value, false));
       }
     } else if (edit.kind === "detailMarkerPos") {
       const cIdx = typeof edit.cIdx === "number" ? edit.cIdx : -1;
@@ -2675,8 +2705,11 @@ export const App: React.FC = () => {
     setMessage("MAP を自動生成しました。");
   };
 
-  const setBuilderMarkerName = (idx: number, name: string): void => {
+  const setBuilderMarkerName = (idx: number, name: string, recordUndo = true): void => {
     if (idx < 0 || idx >= builderMarkers) return;
+    const previousName = builderMarkerMeta[idx]?.name;
+    if (recordUndo && previousName !== name) pushUndo(snapshotBuilder());
+    setBuilderThesisSettings((settings) => settings.geneMarker === previousName ? { ...settings, geneMarker: name } : settings);
     setBuilderMarkerMeta((prev) => {
       const out = Array.isArray(prev) ? prev.map((m) => ({ ...m })) : [];
       while (out.length < builderMarkers) out.push({ name: `m${out.length + 1}` });
@@ -2703,7 +2736,9 @@ export const App: React.FC = () => {
       const out = Array.isArray(prev) ? prev.map((m) => ({ ...m })) : [];
       while (out.length < builderMarkers) out.push({ name: `m${out.length + 1}` });
       const cur = out[idx] || { name: `m${idx + 1}` };
-      out[idx] = { ...cur, pos };
+      const label = cur.label && pos !== undefined
+        ? cur.label.replace(/^-?\d+(?:\.\d+)?/, pos.toFixed(normalizeThesisSettings(builderThesisSettings).positionDecimals)) : cur.label;
+      out[idx] = { ...cur, pos, ...(label ? { label } : {}) };
       return out.slice(0, builderMarkers);
     });
   };
@@ -2822,6 +2857,14 @@ export const App: React.FC = () => {
       annoCols: builderAnnoCols.map((c) => ({ header: c.header, visible: Boolean(c.visible), width: Number(c.width) || 0 })),
       posUnit: opts.posUnit,
       figureMode: opts.figureMode,
+      thesisParentRows: opts.thesisSettings.parentRows,
+      thesisGeneMarker: opts.thesisSettings.geneMarker,
+      thesisGeneLabel: opts.thesisSettings.geneLabel,
+      thesisCandidateEnabled: opts.thesisSettings.candidateEnabled,
+      thesisPositionDecimals: opts.thesisSettings.positionDecimals,
+      thesisFontPt: opts.thesisSettings.fontPt,
+      thesisRowPitchMm: opts.thesisSettings.rowPitchMm,
+      thesisWidthMm: opts.thesisSettings.widthMm,
       chrLabel: opts.chrLabel,
       chrLenMb: opts.chrLenMb,
       coarseMarkersDraft: opts.coarseMarkersDraft,
@@ -2850,6 +2893,7 @@ export const App: React.FC = () => {
         rightLabel: r.rightLabel,
         annotations: Array.isArray(r.annotations) ? r.annotations.slice() : [],
         labelRed: Boolean(r.labelRed),
+        ...(r.bold ? { bold: true } : {}),
         mark: r.mark,
         circle: r.mark === "circle",
         codes: r.codes.slice(0, snap.markers),
@@ -2894,7 +2938,7 @@ export const App: React.FC = () => {
         const chr = String(mm?.chr ?? "").trim() || undefined;
         const posNum = Number((mm as { pos?: unknown })?.pos);
         const pos = Number.isFinite(posNum) ? posNum : undefined;
-        return { name, chr, pos };
+        return { name, chr, pos, ...(typeof mm.label === "string" ? { label: mm.label } : {}), ...(mm.bold ? { bold: true } : {}) };
       })
       .slice(0, markers);
     while (markerMeta.length < markers) markerMeta.push({ name: `m${markerMeta.length + 1}` });
@@ -2941,7 +2985,7 @@ export const App: React.FC = () => {
         const codesRaw = Array.isArray(rr.codes) ? rr.codes : [];
         const codes = codesRaw.map(normalizeBuilderCode).slice(0, markers);
         while (codes.length < markers) codes.push("-");
-        return { id: makeId(), sample, rightLabel, annotations, labelRed, mark, codes };
+        return { id: makeId(), sample, rightLabel, annotations, labelRed, bold: rr.bold === true, mark, codes };
       })
       .filter(Boolean);
 
@@ -2970,7 +3014,10 @@ export const App: React.FC = () => {
     const guideMode = obj.guideMode === "boundaries" ? "boundaries" : builderGuideMode;
     const headerRight = String(obj.headerRight ?? builderHeaderRight);
     const posUnit = String(obj.posUnit ?? builderPosUnit);
-    const figureMode = obj.figureMode === "fa_zoom" ? "fa_zoom" : "simple";
+    const figureMode = obj.figureMode === "thesis" ? "thesis" : obj.figureMode === "fa_zoom" ? "fa_zoom" : "simple";
+    const thesisSettings = normalizeThesisSettings({ parentRows: obj.thesisParentRows as number, geneMarker: obj.thesisGeneMarker as string,
+      geneLabel: obj.thesisGeneLabel as string, candidateEnabled: obj.thesisCandidateEnabled as boolean,
+      positionDecimals: obj.thesisPositionDecimals as number, fontPt: obj.thesisFontPt as number, rowPitchMm: obj.thesisRowPitchMm as number, widthMm: obj.thesisWidthMm as number });
     const chrLabel = String(obj.chrLabel ?? builderChrLabel);
     const chrLenMbRaw = Number(obj.chrLenMb ?? builderChrLenMb);
     const chrLenMb = Number.isFinite(chrLenMbRaw) && chrLenMbRaw > 0 ? chrLenMbRaw : builderChrLenMb;
@@ -3052,6 +3099,7 @@ export const App: React.FC = () => {
       setBuilderHeaderRight(headerRight);
       setBuilderPosUnit(posUnit);
       setBuilderFigureMode(figureMode);
+      setBuilderThesisSettings(thesisSettings);
       setBuilderChrLabel(chrLabel);
       setBuilderChrLenMb(chrLenMb);
       setBuilderCoarseMarkersDraft(coarseMarkersDraft);
@@ -3094,8 +3142,28 @@ export const App: React.FC = () => {
       const chr = String(m?.chr ?? "").trim() || undefined;
       const posNum = Number((m as { pos?: unknown })?.pos);
       const pos = Number.isFinite(posNum) ? posNum : undefined;
-      return { name, chr, pos };
+      return { name, chr, pos, label: m?.label, bold: m?.bold };
     });
+    if (opts.figureMode === "thesis") {
+      const chrs = new Set(markers.map((marker) => marker.chr).filter(Boolean));
+      if (chrs.size > 1) throw new Error("修論形式は1本の染色体ごとに作成してください。");
+      const geneMarkerIndex = markers.findIndex((marker) => marker.name === opts.thesisSettings.geneMarker);
+      const visibleColumns = builderAnnoCols.map((column, index) => ({ ...column, index })).filter((column) => column.visible);
+      const figure = makeThesisFigure({
+        markers: markers.map((marker) => ({ name: marker.name, pos: marker.pos ?? NaN, label: marker.label, bold: marker.bold })),
+        rows: rowsMeta.map((row) => ({ id: row.id, sample: row.sample, codes: [...row.codes],
+          annotations: visibleColumns.map((column) => row.annotations[column.index] || ""), bold: row.bold })),
+        annotationHeaders: visibleColumns.map((column) => column.header),
+        chromosomeLabel: opts.chrLabel, chromosomeLength: opts.chrLenMb,
+        parentRows: opts.thesisSettings.parentRows, fontPt: opts.thesisSettings.fontPt, rowPitchMm: opts.thesisSettings.rowPitchMm,
+        widthMm: opts.thesisSettings.widthMm,
+        positionDecimals: opts.thesisSettings.positionDecimals, unit: opts.posUnit,
+        candidate: opts.thesisSettings.candidateEnabled ? { start: opts.arrowStartMb, end: opts.arrowEndMb } : undefined,
+        gene: geneMarkerIndex >= 0 ? { markerIndex: geneMarkerIndex, label: opts.thesisSettings.geneLabel || markers[geneMarkerIndex].name, fontStyle: "normal" } : undefined,
+        legendLabels: { A: opts.genoLegendA, B: opts.genoLegendB, H: opts.genoLegendH, missing: "未判定" },
+      });
+      return { ...figure, overlays: [...(figure.overlays || []), ...(builderUserOverlaysRef.current || [])] };
+    }
     const rows = rowsMeta.map((r) => ({ sample: r.id, codes: r.codes }));
     const showXAxis = opts.figureMode === "fa_zoom" ? false : !opts.showMarkerAxis;
     const scaleByPosition = opts.figureMode === "fa_zoom" ? false : snap.scaleByPosition;
@@ -4082,7 +4150,7 @@ export const App: React.FC = () => {
       const chr = String(m?.chr ?? "").trim() || undefined;
       const posNum = Number((m as { pos?: unknown })?.pos);
       const pos = Number.isFinite(posNum) ? posNum : undefined;
-      return { name, chr, pos };
+      return { name, chr, pos, ...(typeof m?.label === "string" ? { label: m.label } : {}), ...(m?.bold ? { bold: true } : {}) };
     });
     const rows = snap.rows.map((r) => ({ sample: r.id, codes: r.codes.slice() }));
     const rowMeta: Record<string, MatrixRowMeta> = {};
@@ -5126,7 +5194,9 @@ export const App: React.FC = () => {
       try {
         applyConfig(makeConfigFromBuilder(), "builder_generated", { silent: true, syncText: false });
       } catch (e) {
-        setJsonError(e instanceof Error ? e.message : String(e));
+        const error = e instanceof Error ? e.message : String(e);
+        setJsonError(error);
+        setBuilderRenderError(error);
       }
     });
     return () => {
@@ -5148,6 +5218,7 @@ export const App: React.FC = () => {
     builderHeaderRight,
     builderPosUnit,
     builderFigureMode,
+    builderThesisSettings,
     builderChrLabel,
     builderChrLenMb,
     builderCoarseMarkersDraft,
@@ -5189,7 +5260,9 @@ export const App: React.FC = () => {
     try {
       applyConfig(makeConfigFromBuilder(), "builder_generated", { silent: true, syncText: false });
     } catch (e) {
-      setJsonError(e instanceof Error ? e.message : String(e));
+      const error = e instanceof Error ? e.message : String(e);
+      setJsonError(error);
+      setBuilderRenderError(error);
     }
   }, [tab, builderEditMode]);
 
@@ -5309,6 +5382,7 @@ export const App: React.FC = () => {
 
   const doExport = async (): Promise<void> => {
     if (!svgRef.current) return;
+    if (builderRenderError) { setMessage(`図を更新できていません: ${builderRenderError}`); return; }
     setBusy(true);
     try {
       const size = exportPrintSize
@@ -5371,7 +5445,19 @@ export const App: React.FC = () => {
     setMessage("論文用の白背景・配色・余白と印刷設定を適用しました。原稿での文字サイズを確認してください。");
   };
 
+  const setThesisBuilder = (): void => {
+    setBuilderFigureMode("thesis");
+    setBuilderTheme("light");
+    setBuilderPaletteId("paper_blue_yellow");
+    setBuilderEditMode("preview");
+    setPublicationExport();
+    setExportWidthMm(builderThesisSettings.widthMm);
+    requestAnimationFrame(() => document.getElementById("thesis-layout-settings")?.scrollIntoView({ block: "nearest" }));
+    setMessage("Drive修論の物理目盛り・遺伝子型・表現型・凡例の配置を適用しました。候補区間と遺伝子列は修論形式の設定で指定します。");
+  };
+
   const saveFigureProject = (): void => {
+    if (builderRenderError) { setMessage(`図を更新できていません: ${builderRenderError}`); return; }
     const project = {
       format: "matrix-block-canvas-figure",
       version: 1,
@@ -6441,7 +6527,7 @@ export const App: React.FC = () => {
                     <div className="ggt-row">
                       <label className="seq-label">
                         <span>Palette</span>
-                        <select className="ggt-select" value={builderPaletteId} onChange={(e) => setBuilderPaletteId(e.target.value)}>
+                        <select className="ggt-select" disabled={builderFigureMode === "thesis"} value={builderPaletteId} onChange={(e) => setBuilderPaletteId(e.target.value)}>
                           {palettePresets.map((p) => (
                             <option key={p.id} value={p.id}>
                               {p.name}
@@ -6451,7 +6537,7 @@ export const App: React.FC = () => {
                       </label>
                       <label className="seq-label">
                         <span>Theme</span>
-                        <select className="ggt-select" value={builderTheme} onChange={(e) => setBuilderTheme(e.target.value as "dark" | "light")}>
+                        <select className="ggt-select" disabled={builderFigureMode === "thesis"} value={builderTheme} onChange={(e) => setBuilderTheme(e.target.value as "dark" | "light")}>
                           <option value="dark">Dark</option>
                           <option value="light">Light</option>
                         </select>
@@ -6477,7 +6563,8 @@ export const App: React.FC = () => {
                           type="number"
                           min={800}
                           max={12000}
-                          value={builderCanvasWidth}
+                          disabled={builderFigureMode === "thesis"}
+                          value={builderFigureMode === "thesis" ? builderThesisSettings.widthMm * 10 : builderCanvasWidth}
                           onChange={(e) => setBuilderCanvasWidthSafe(Number(e.target.value))}
                         />
                       </label>
@@ -6486,6 +6573,9 @@ export const App: React.FC = () => {
                     <div className="ggt-actions">
                       <button type="button" className="seq-button secondary" onClick={setPublicationBuilder}>
                         論文用に整える
+                      </button>
+                      <button type="button" className="seq-button" onClick={setThesisBuilder}>
+                        修論の図に合わせる
                       </button>
                     </div>
                     <details className="ggt-details">
@@ -6593,10 +6683,10 @@ export const App: React.FC = () => {
                           type="checkbox"
                           checked={builderScaleByPos}
                           onChange={(e) => setBuilderScaleByPos(e.target.checked)}
-                          disabled={builderFigureMode === "fa_zoom"}
+                          disabled={builderFigureMode === "fa_zoom" || builderFigureMode === "thesis"}
                           style={{ marginRight: 8 }}
                         />
-                        {builderFigureMode === "fa_zoom" ? "均等配置（pos は表示用）" : "chr/pos でスケール（位置に比例）"}
+                        {builderFigureMode === "thesis" ? "物理目盛りと等間隔セルを引出線で結ぶ" : builderFigureMode === "fa_zoom" ? "均等配置（pos は表示用）" : "chr/pos でスケール（位置に比例）"}
                       </label>
                     </div>
                     <div className="ggt-help">
@@ -6729,13 +6819,14 @@ export const App: React.FC = () => {
                   </div>
 
 	                  <div className="ggt-card">
-	                    <div className="ggt-card-title">Numeric window</div>
+	                    <div className="ggt-card-title">図の構成</div>
 	                    <div className="ggt-row">
 	                      <label className="seq-label">
 	                        <span>図モード</span>
-	                        <select className="ggt-select" value={builderFigureMode} onChange={(e) => setBuilderFigureMode(e.target.value as BuilderFigureMode)}>
+	                        <select aria-label="図モード" className="ggt-select" value={builderFigureMode} onChange={(e) => setBuilderFigureMode(e.target.value as BuilderFigureMode)}>
 	                          <option value="simple">Standard</option>
 	                          <option value="fa_zoom">Numeric window</option>
+	                          <option value="thesis">修論形式（物理目盛り＋遺伝子型）</option>
 	                        </select>
 	                      </label>
 	                      {builderFigureMode === "fa_zoom" ? (
@@ -6747,7 +6838,7 @@ export const App: React.FC = () => {
 	                          </select>
 	                        </label>
 	                      ) : null}
-	                      <div className="ggt-actions" style={{ alignItems: "flex-end" }}>
+                      <div className="ggt-actions" style={{ alignItems: "flex-end" }} hidden={builderFigureMode === "thesis"}>
 	                        <button type="button" className="seq-button secondary" onClick={applyFaZoomDefaults}>
 	                          推奨設定
 	                        </button>
@@ -6757,7 +6848,37 @@ export const App: React.FC = () => {
                       </div>
                     </div>
 
-	                    <details className="ggt-details">
+                    {builderFigureMode === "thesis" ? <div className="ggt-card" id="thesis-layout-settings">
+                      <div className="ggt-card-title">修論形式の設定</div>
+                      <div className="ggt-help">位置と染色体長は同じ単位で入力します。細いセルと横並び凡例、白背景・青黄白灰の配色を使います。</div>
+                      <div className="ggt-row">
+                        <label className="seq-label"><span>図の幅(mm)</span><input className="seq-input" type="number" min={80} max={500} value={builderThesisSettings.widthMm} onChange={(e) => { const widthMm = Number(e.target.value); setBuilderThesisSettings((settings) => ({ ...settings, widthMm })); if (widthMm > 0) setExportWidthMm(widthMm); }} /></label>
+                        <label className="seq-label"><span>文字サイズ(pt)</span><input className="seq-input" type="number" min={5} max={16} step={0.5} value={builderThesisSettings.fontPt} onChange={(e) => setBuilderThesisSettings((settings) => ({ ...settings, fontPt: Number(e.target.value) }))} /></label>
+                        <label className="seq-label"><span>行ピッチ(mm)</span><input className="seq-input" type="number" min={2.5} max={12} step={0.1} value={builderThesisSettings.rowPitchMm} onChange={(e) => setBuilderThesisSettings((settings) => ({ ...settings, rowPitchMm: Number(e.target.value) }))} /></label>
+                        <label className="seq-label"><span>親として区切る先頭行数</span><input className="seq-input" type="number" min={0} max={builderRows.length} value={builderThesisSettings.parentRows} onChange={(e) => setBuilderThesisSettings((settings) => ({ ...settings, parentRows: Number(e.target.value) }))} /></label>
+                        <label className="seq-label"><span>位置の小数桁</span><input className="seq-input" type="number" min={0} max={8} value={builderThesisSettings.positionDecimals} onChange={(e) => setBuilderThesisSettings((settings) => ({ ...settings, positionDecimals: Number(e.target.value) }))} /></label>
+                        <label className="seq-label"><span>直接判定の遺伝子列</span><select aria-label="直接判定の遺伝子列" className="ggt-select" value={builderThesisSettings.geneMarker} onChange={(e) => setBuilderThesisSettings((settings) => ({ ...settings, geneMarker: e.target.value }))}><option value="">枠を表示しない</option>{builderMarkerMeta.map((marker, index) => <option key={index} value={marker.name}>{marker.name}</option>)}</select></label>
+                        <label className="seq-label"><span>遺伝子列のラベル</span><input className="seq-input" value={builderThesisSettings.geneLabel} onChange={(e) => setBuilderThesisSettings((settings) => ({ ...settings, geneLabel: e.target.value }))} /></label>
+                      </div>
+                      <label className="ggt-muted"><input type="checkbox" checked={builderThesisSettings.candidateEnabled} onChange={(e) => setBuilderThesisSettings((settings) => ({ ...settings, candidateEnabled: e.target.checked }))} />候補区間を軸上の赤棒で表示</label>
+                      <div className="ggt-row">
+                        <label className="seq-label"><span>候補区間の開始位置</span><input className="seq-input" type="number" step="any" value={builderArrowStartMb} onChange={(e) => setBuilderArrowStartMb(Number(e.target.value))} /></label>
+                        <label className="seq-label"><span>候補区間の終了位置</span><input className="seq-input" type="number" step="any" value={builderArrowEndMb} onChange={(e) => setBuilderArrowEndMb(Number(e.target.value))} /></label>
+                        <label className="seq-label"><span>染色体名</span><input className="seq-input" value={builderChrLabel} onChange={(e) => setBuilderChrLabel(e.target.value)} /></label>
+                        <label className="seq-label"><span>染色体長（位置と同じ単位）</span><input className="seq-input" type="number" step="any" value={builderChrLenMb} onChange={(e) => setBuilderChrLenMb(Number(e.target.value))} /></label>
+                      </div>
+                      <div className="ggt-row">
+                        <label className="seq-label"><span>親Aの凡例</span><input className="seq-input" value={builderGenoLegendA} onChange={(e) => setBuilderGenoLegendA(e.target.value)} /></label>
+                        <label className="seq-label"><span>親Bの凡例</span><input className="seq-input" value={builderGenoLegendB} onChange={(e) => setBuilderGenoLegendB(e.target.value)} /></label>
+                        <label className="seq-label"><span>ヘテロ型の凡例</span><input className="seq-input" value={builderGenoLegendH} onChange={(e) => setBuilderGenoLegendH(e.target.value)} /></label>
+                        {builderAnnoCols.map((column, index) => column.visible ? <label key={column.id} className="seq-label"><span>表現型見出し {index + 1}（改行可）</span><textarea className="seq-textarea" rows={2} value={column.header} onChange={(e) => setBuilderAnnoColHeader(index, e.target.value)} /></label> : null)}
+                      </div>
+                      <details className="ggt-details"><summary>位置の注記と個体名の強調</summary>
+                        <div className="ggt-table-scroll"><table className="ggt-table"><thead><tr><th>マーカー</th><th>位置ラベル（空欄は自動）</th></tr></thead><tbody>{builderMarkerMeta.map((marker, index) => <tr key={index}><td>{marker.name}</td><td><input className="seq-input" aria-label={`位置ラベル ${index + 1}`} value={marker.label || ""} onChange={(e) => setBuilderMarkerMeta((previous) => previous.map((item, idx) => idx === index ? { ...item, label: e.target.value || undefined } : item))} /></td></tr>)}</tbody></table></div>
+                        <div className="ggt-table-scroll"><table className="ggt-table"><thead><tr><th>個体</th><th>太字</th></tr></thead><tbody>{builderRows.map((row, index) => <tr key={row.id}><td>{row.sample}</td><td><input type="checkbox" aria-label={`個体名の太字 ${index + 1}`} checked={Boolean(row.bold)} onChange={(e) => setBuilderRows((previous) => previous.map((item, idx) => idx === index ? { ...item, bold: e.target.checked } : item))} /></td></tr>)}</tbody></table></div>
+                      </details>
+                    </div> : null}
+	                    <details className="ggt-details" hidden={builderFigureMode === "thesis"}>
 	                      <summary>設定</summary>
 	                      <div className="ggt-row" style={{ marginTop: 8 }}>
 	                        <label className="seq-label">
@@ -8691,13 +8812,13 @@ export const App: React.FC = () => {
                     <button type="button" className="seq-button secondary" onClick={setExportToConfigSize}>
                       SVGサイズに合わせる ({Math.floor(config.width)}x{Math.floor(config.height)})
                     </button>
-                    <button type="button" className="seq-button" onClick={doExport} disabled={busy || !exportSize}>
+                    <button type="button" className="seq-button" onClick={doExport} disabled={busy || !exportSize || Boolean(builderRenderError)}>
                       {busy ? "書き出し中..." : "保存"}
                     </button>
                   </div>
                   <div className="ggt-help">PNGは白背景で保存し、印刷幅の情報を含めます。SVGは文字を編集できますが、別のPCではフォントの字形が変わることがあります。原稿へ配置した後も文字の大きさを確認してください。</div>
                   <div className="ggt-actions">
-                    <button type="button" className="seq-button secondary" onClick={saveFigureProject}>図設定JSONを保存</button>
+                    <button type="button" className="seq-button secondary" onClick={saveFigureProject} disabled={Boolean(builderRenderError)}>図設定JSONを保存</button>
                     <label className="seq-label">
                       <span>図設定JSONを読み込む</span>
                       <input type="file" accept=".json,application/json" onChange={(e) => { const file = e.target.files?.[0]; if (file) void loadFigureProject(file); e.target.value = ""; }} />

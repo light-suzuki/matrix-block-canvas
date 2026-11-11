@@ -1,3 +1,5 @@
+import { getSvgTextGeometry } from "./svgTextGeometry";
+
 export interface FigureQuality {
   minFontPt: number;
   clipped: number;
@@ -8,17 +10,10 @@ export const inspectFigureQuality = (svg: SVGSVGElement, widthMm: number): Figur
   const rootMatrix = svg.getCTM();
   const viewBox = svg.viewBox.baseVal;
   if (!rootMatrix || !viewBox.width) return { minFontPt: 0, clipped: 0, overlaps: 0 };
-  const inverse = rootMatrix.inverse();
   const nodes = [...svg.querySelectorAll<SVGTextElement>("text")].filter((node) => node.textContent?.trim() && !node.closest("defs, [data-export-exclude]"));
   const boxes = nodes.flatMap((node) => {
-    const matrix = node.getCTM();
-    if (!matrix) return [];
-    const bounds = node.getBBox();
-    const transform = inverse.multiply(matrix);
-    const points = [[bounds.x, bounds.y], [bounds.x + bounds.width, bounds.y], [bounds.x + bounds.width, bounds.y + bounds.height], [bounds.x, bounds.y + bounds.height]]
-      .map(([x, y]) => new DOMPoint(x, y).matrixTransform(transform));
-    return [{ x0: Math.min(...points.map((point) => point.x)), x1: Math.max(...points.map((point) => point.x)),
-      y0: Math.min(...points.map((point) => point.y)), y1: Math.max(...points.map((point) => point.y)), points }];
+    const geometry = getSvgTextGeometry(node, svg);
+    return geometry ? [geometry] : [];
   });
   let overlaps = 0;
   for (let i = 0; i < boxes.length; i++) {

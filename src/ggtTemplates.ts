@@ -88,6 +88,9 @@ export type XAxisConfig = {
 };
 
 export type OverlayBase = {
+  role?: string;
+  rowId?: string;
+  markerIndex?: number;
   id?: string;
   name?: string;
   locked?: boolean;
@@ -120,6 +123,7 @@ export type OverlayRect = OverlayBase & {
   ry?: number;
 };
 export type OverlayText = OverlayBase & {
+  rotation?: number;
   kind: "text";
   x: number;
   y: number;
@@ -625,7 +629,7 @@ export type ParseTsvOpts = {
   showXAxis?: boolean;
 };
 
-export type MarkerInfo = { name: string; chr?: string; pos?: number };
+export type MarkerInfo = { name: string; chr?: string; pos?: number; label?: string; bold?: boolean };
 type ParsedWideTsv = { markers: MarkerInfo[]; rows: { sample: string; codes: string[] }[] };
 
 const normalizeCode = (raw: string): string => {

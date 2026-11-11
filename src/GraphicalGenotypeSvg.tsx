@@ -865,6 +865,7 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
                 markerStart={markerStart}
                 markerEnd={markerEnd}
                 data-ggt-overlay-id={overlayId}
+                data-ggt-role={o.role}
                 pointerEvents={pointerEvents}
               />
             );
@@ -885,6 +886,7 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
                 strokeWidth={r.stroke ? r.strokeWidth ?? 1 : 0}
                 opacity={opacityNum}
                 data-ggt-overlay-id={overlayId}
+                data-ggt-role={o.role}
                 pointerEvents={pointerEvents}
               />
             );
@@ -901,6 +903,7 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
                 strokeDasharray={p.dash}
                 opacity={opacityNum}
                 data-ggt-overlay-id={overlayId}
+                data-ggt-role={o.role}
                 pointerEvents={pointerEvents}
               />
             );
@@ -919,9 +922,15 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
                 fontStyle={t.fontStyle || "normal"}
                 textAnchor={t.anchor || "start"}
                 dominantBaseline={t.baseline || "auto"}
+                transform={t.rotation ? `rotate(${t.rotation}, ${t.x}, ${t.y})` : undefined}
                 opacity={opacityNum}
                 data-ggt-overlay-id={overlayId}
-                pointerEvents={pointerEvents}
+                data-ggt-role={t.role}
+                data-ggt-label={t.role}
+                data-ggt-row-id={t.rowId}
+                data-ggt-track-id={t.role === "marker-position" ? "__thesis_axis__" : undefined}
+                data-ggt-marker-index={t.role === "marker-position" ? t.markerIndex : undefined}
+                pointerEvents={t.rowId || t.markerIndex !== undefined ? "visiblePainted" : pointerEvents}
               >
                 {t.text}
               </text>
