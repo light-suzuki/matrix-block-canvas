@@ -60,12 +60,16 @@ export const getPublicationDimensions = (opts: {
   dpi: number;
   sourceWidth: number;
   sourceHeight: number;
+  vector?: boolean;
 }): PublicationDimensions => {
   const widthMm = positive(opts.widthMm, "印刷幅(mm)");
   const dpi = validDpi(opts.dpi);
   const ratio = positive(opts.sourceHeight, "図の高さ") / positive(opts.sourceWidth, "図の幅");
   const heightMm = widthMm * ratio;
-  return { ...rasterDimensions(widthMm / 25.4 * dpi, heightMm / 25.4 * dpi), widthMm, heightMm, dpi };
+  const width = widthMm / 25.4 * dpi;
+  const height = heightMm / 25.4 * dpi;
+  const dimensions = opts.vector ? { width: Math.round(width), height: Math.round(height) } : rasterDimensions(width, height);
+  return { ...dimensions, widthMm, heightMm, dpi };
 };
 
 const timestamp = (): string => new Date().toISOString().replace(/[:.]/g, "-");

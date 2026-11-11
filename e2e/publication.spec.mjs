@@ -26,18 +26,57 @@ const applyConfig = async (page, config) => {
 };
 
 const textGeometry = async (svg) => svg.evaluate((root) => {
-  const round = (value) => Math.round(value * 10_000) / 10_000;
   const inverse = root.getCTM().inverse();
   const boxes = [...root.querySelectorAll('text')].filter((node) => node.textContent.trim()).map((node) => {
     const bounds = node.getBBox();
     const transform = inverse.multiply(node.getCTM());
-    const corners = [[bounds.x, bounds.y], [bounds.x + bounds.width, bounds.y + bounds.height]]
-      .map(([x, y]) => new DOMPoint(x, y).matrixTransform(transform));
-    return { text: node.textContent, x: round(corners[0].x), y: round(corners[0].y), width: round(corners[1].x - corners[0].x), height: round(corners[1].y - corners[0].y) };
+    const polygon = [
+      [bounds.x, bounds.y],
+      [bounds.x + bounds.width, bounds.y],
+      [bounds.x + bounds.width, bounds.y + bounds.height],
+      [bounds.x, bounds.y + bounds.height],
+    ].map(([x, y]) => {
+      const point = new DOMPoint(x, y).matrixTransform(transform);
+      return { x: point.x, y: point.y };
+    });
+    const x = Math.min(...polygon.map((point) => point.x));
+    const y = Math.min(...polygon.map((point) => point.y));
+    return { text: node.textContent, x, y, width: Math.max(...polygon.map((point) => point.x)) - x,
+      height: Math.max(...polygon.map((point) => point.y)) - y, polygon };
   });
   const viewBox = root.viewBox.baseVal;
   return { width: viewBox.width, height: viewBox.height, boxes };
 });
+
+const assertSameGeometry = (actual, expected, context) => {
+  expect(actual.width, `${context}: figure width`).toBe(expected.width);
+  expect(actual.height, `${context}: figure height`).toBe(expected.height);
+  expect(actual.boxes.map((box) => box.text), `${context}: complete labels`).toEqual(expected.boxes.map((box) => box.text));
+  for (let i = 0; i < expected.boxes.length; i += 1) {
+    for (const key of ['x', 'y', 'width', 'height']) {
+      expect(Math.abs(actual.boxes[i][key] - expected.boxes[i][key]), `${context}: ${expected.boxes[i].text}: ${key}`)
+        .toBeLessThan(0.001);
+    }
+  }
+};
+
+const polygonsOverlap = (a, b) => {
+  for (const polygon of [a, b]) {
+    for (let i = 0; i < polygon.length; i += 1) {
+      const start = polygon[i];
+      const end = polygon[(i + 1) % polygon.length];
+      const length = Math.hypot(end.x - start.x, end.y - start.y);
+      if (length < 1e-9) continue;
+      const normal = { x: -(end.y - start.y) / length, y: (end.x - start.x) / length };
+      const projectionA = a.map((point) => point.x * normal.x + point.y * normal.y);
+      const projectionB = b.map((point) => point.x * normal.x + point.y * normal.y);
+      const overlap = Math.min(Math.max(...projectionA), Math.max(...projectionB))
+        - Math.max(Math.min(...projectionA), Math.min(...projectionB));
+      if (overlap <= 1) return false;
+    }
+  }
+  return true;
+};
 
 const assertReadableText = ({ width, height, boxes }) => {
   for (const box of boxes) {
@@ -51,9 +90,7 @@ const assertReadableText = ({ width, height, boxes }) => {
     for (let j = i + 1; j < boxes.length; j += 1) {
       const a = boxes[i];
       const b = boxes[j];
-      const overlapX = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
-      const overlapY = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
-      if (overlapX > 1 && overlapY > 1) overlaps.push([a.text, b.text]);
+      if (polygonsOverlap(a.polygon, b.polygon)) overlaps.push([a.text, b.text]);
     }
   }
   expect(overlaps, 'visible labels must not overlap').toEqual([]);
@@ -72,7 +109,7 @@ test('Japanese headers, crowded markers, and large legend text remain complete a
   await testInfo.attach('publication-layout', { body: await svg.screenshot(), contentType: 'image/png' });
 
   await page.setViewportSize({ width: 1000, height: 800 });
-  expect(await textGeometry(svg), 'resizing the editor must not change figure coordinates').toEqual(initial);
+  assertSameGeometry(await textGeometry(svg), initial, 'resizing the editor');
 });
 
 test('standalone SVG preserves the preview coordinates and carries its own text styling', async ({ page, browser }) => {
@@ -137,6 +174,52 @@ test('publication PNG uses the specified millimetres and dpi without distorting 
   expect(differingPixelFraction, 'PNG and standalone SVG must show the same figure').toBeLessThan(0.001);
 });
 
+test('a tall supplementary figure exports as SVG while oversized raster export stays disabled', async ({ page }) => {
+  const tallConfig = {
+    width: 900, height: 5000, background: '#ffffff', columns: 3,
+    plot: { x: 150, y: 80, width: 450, annotationWidth: 220, rowHeight: 38, rowGap: 10 },
+    styles: { text: { fontFamily: 'Arial, sans-serif', fontSize: 16, fill: '#111827' } },
+    annotationHeaders: { left: '判定', fontSize: 16, fill: '#111827' },
+    tracks: Array.from({ length: 100 }, (_, i) => ({
+      id: `supplement-${i + 1}`,
+      leftText: { text: `付図合成F₂-${i + 1}` },
+      rightText: { text: i % 2 === 0 ? '有' : '未判定' },
+      segments: [{ start: 0, end: 0.5, fill: '#0072b2' }, { start: 0.5, end: 1, fill: '#e69f00' }],
+    })),
+  };
+  await page.goto('/');
+  await applyConfig(page, tallConfig);
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page.getByLabel('形式', { exact: true }).selectOption('png');
+  await page.getByLabel('印刷幅(mm)', { exact: true }).fill('140');
+  await page.getByLabel('解像度(dpi)', { exact: true }).fill('600');
+  const save = page.getByRole('button', { name: '保存', exact: true });
+  await expect(save).toBeDisabled();
+
+  await page.getByLabel('形式', { exact: true }).selectOption('svg');
+  await expect(page.getByLabel('解像度(dpi)', { exact: true })).toBeDisabled();
+  await expect(save).toBeEnabled();
+  const waiting = page.waitForEvent('download');
+  await save.click();
+  const bytes = await readDownload(await waiting);
+  const exported = await page.evaluate((xml) => {
+    const document = new DOMParser().parseFromString(xml, 'image/svg+xml');
+    const root = document.documentElement;
+    return {
+      parseErrors: document.querySelectorAll('parsererror').length,
+      viewBox: root.getAttribute('viewBox'),
+      width: root.getAttribute('width'),
+      samples: [...document.querySelectorAll('text')].filter((node) => /^付図合成F₂-\d+$/.test(node.textContent)).length,
+    };
+  }, bytes.toString('utf8'));
+  expect(exported).toEqual({ parseErrors: 0, viewBox: '0 0 900 5000', width: '140mm', samples: 100 });
+
+  await page.getByLabel('形式', { exact: true }).selectOption('png');
+  await expect(save).toBeDisabled();
+  await page.getByLabel('解像度(dpi)', { exact: true }).fill('300');
+  await expect(save).toBeEnabled();
+});
+
 test('figure JSON restores the exact drawing and print settings after another figure is loaded', async ({ page }) => {
   await page.goto('/');
   await applyConfig(page, publicationConfig);
@@ -156,7 +239,7 @@ test('figure JSON restores the exact drawing and print settings after another fi
     name: 'restored-figure.json', mimeType: 'application/json', buffer: bytes,
   });
   await expect(figure(page)).toContainText('合成個体F₂-001（組換え型）');
-  expect(await textGeometry(figure(page))).toEqual(initial);
+  assertSameGeometry(await textGeometry(figure(page)), initial, 'restoring figure JSON');
   await expect(page.getByLabel('印刷幅(mm)', { exact: true })).toHaveValue('150');
   await expect(page.getByLabel('解像度(dpi)', { exact: true })).toHaveValue('300');
 });
@@ -188,7 +271,7 @@ test('Builder project save and restore preserves all genotypes, missing values, 
   const restored = JSON.parse((await readDownload(await again)).toString('utf8'));
   expect(restored.rows).toEqual(saved.rows);
   expect(restored.markerMeta).toEqual(saved.markerMeta);
-  expect(await textGeometry(figure(page))).toEqual(initial);
+  assertSameGeometry(await textGeometry(figure(page)), initial, 'restoring Builder project');
 });
 
 for (const markerCount of [3, 20]) {
@@ -229,7 +312,11 @@ for (const markerCount of [3, 20]) {
 }
 
 test('clicking a spread marker label edits that marker rather than the nearest column', async ({ page }) => {
-  const project = makeZoomProject(20);
+  const project = {
+    ...builderProject,
+    scaleByPosition: true,
+    markerMeta: builderProject.markerMeta.map((marker, i) => ({ ...marker, name: `合成0${i + 1}`, pos: [10, 10.001, 20][i] })),
+  };
   await page.goto('/');
   await page.getByRole('button', { name: 'Builder', exact: true }).click();
   await page.getByLabel('Project(.json) 読み込み', { exact: true }).setInputFiles({
@@ -237,7 +324,7 @@ test('clicking a spread marker label edits that marker rather than the nearest c
   });
   await page.getByRole('button', { name: '論文用に整える', exact: true }).click();
   const svg = figure(page);
-  const shiftedIndex = await svg.locator('[data-ggt-axis-track="__detail_axis__"]').evaluate((axis) => {
+  const shiftedIndex = await svg.locator('[data-ggt-axis-track="__marker_axis__"]').evaluate((axis) => {
     for (const node of axis.querySelectorAll('[data-ggt-label="marker-name"]')) {
       const leader = node.parentElement.querySelector('[data-ggt-label-leader="top"]');
       if (leader && Math.abs(Number(leader.getAttribute('x1')) - Number(node.getAttribute('x'))) > 10) {
@@ -247,7 +334,7 @@ test('clicking a spread marker label edits that marker rather than the nearest c
     return -1;
   });
   expect(shiftedIndex, 'fixture must include a label displaced from its marker anchor').toBeGreaterThanOrEqual(0);
-  const target = svg.locator(`[data-ggt-track-id="__detail_axis__"][data-ggt-label="marker-name"][data-ggt-marker-index="${shiftedIndex}"]`);
+  const target = svg.locator(`[data-ggt-track-id="__marker_axis__"][data-ggt-label="marker-name"][data-ggt-marker-index="${shiftedIndex}"]`);
   await target.click();
   const popover = page.locator('.ggt-canvas-popover');
   await expect(popover.locator('.ggt-canvas-popover-title')).toHaveText(`詳細マーカー名 • #${shiftedIndex + 1}`);

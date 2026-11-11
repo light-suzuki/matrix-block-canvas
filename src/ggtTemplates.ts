@@ -28,6 +28,9 @@ export type GraphTrack = {
     labelBottomFill?: string;
     labelTopFontSize?: number;
     labelBottomFontSize?: number;
+    labelTopRotation?: number;
+    labelBottomRotation?: number;
+    yOffset?: number;
     title?: string;
     titleFill?: string;
     titleFontSize?: number;

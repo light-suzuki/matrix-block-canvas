@@ -375,7 +375,9 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
   const renderAxisTrack = (track: GraphTrack, y: number, h: number): React.ReactNode => {
     const axis = track.axis;
     if (!axis || !Array.isArray(axis.ticks) || axis.ticks.length === 0) return null;
-    const axisY = y + h * 0.5;
+    const axisY = y + (axis.yOffset ?? h * 0.5);
+    const topRotation = Number.isFinite(axis.labelTopRotation) ? axis.labelTopRotation ?? 0 : 0;
+    const bottomRotation = Number.isFinite(axis.labelBottomRotation) ? axis.labelBottomRotation ?? 0 : 0;
     const stroke = axis.stroke || cfg.colLine.stroke;
     const strokeWidth = axis.strokeWidth ?? Math.max(1, cfg.colLine.strokeWidth);
     const tickStroke = axis.tickStroke || stroke;
@@ -406,17 +408,17 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
 	          const tickBottomFill = t.labelBottomFill || bottomFill;
 	          const topPlan = topLabels.get(i);
 	          const bottomPlan = bottomLabels.get(i);
-	          const topX = topPlan?.x ?? x;
-	          const bottomX = bottomPlan?.x ?? x;
-	          const topY = y1 - 4 - (topPlan?.lane ?? 0) * metrics.top.lineHeight;
-	          const bottomY = y2 + 4 + (bottomPlan?.lane ?? 0) * metrics.bottom.lineHeight;
+	          const topX = topRotation ? x : topPlan?.x ?? x;
+	          const bottomX = bottomRotation ? x : bottomPlan?.x ?? x;
+	          const topY = topRotation ? axisY - tickSize * 0.5 - 8 : y1 - 4 - (topPlan?.lane ?? 0) * metrics.top.lineHeight;
+	          const bottomY = bottomRotation ? axisY + tickSize * 0.5 + 8 : y2 + 4 + (bottomPlan?.lane ?? 0) * metrics.bottom.lineHeight;
 	          return (
 	            <g key={i}>
 	              <line x1={x} x2={x} y1={y1} y2={y2} stroke={tickStroke} strokeWidth={tickStrokeWidth} opacity={0.9} />
-	              {top && (Math.abs(topX - x) > 1 || (topPlan?.lane ?? 0) > 0) ? (
+	              {top && !topRotation && (Math.abs(topX - x) > 1 || (topPlan?.lane ?? 0) > 0) ? (
 	                <line data-ggt-label-leader="top" x1={x} y1={y1} x2={topX} y2={topY + 2} stroke={tickStroke} strokeWidth={Math.min(1, tickStrokeWidth)} />
 	              ) : null}
-	              {bottom && (Math.abs(bottomX - x) > 1 || (bottomPlan?.lane ?? 0) > 0) ? (
+	              {bottom && !bottomRotation && (Math.abs(bottomX - x) > 1 || (bottomPlan?.lane ?? 0) > 0) ? (
 	                <line data-ggt-label-leader="bottom" x1={x} y1={y2} x2={bottomX} y2={bottomY - 2} stroke={tickStroke} strokeWidth={Math.min(1, tickStrokeWidth)} />
 	              ) : null}
 	              {top ? (
@@ -430,7 +432,8 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
 	                  fontFamily={cfg.text.fontFamily}
 	                  fontSize={topFontSize}
 	                  fontWeight={800}
-	                  textAnchor="middle"
+	                  textAnchor={topRotation ? "start" : "middle"}
+	                  transform={topRotation ? `rotate(${topRotation}, ${topX}, ${topY})` : undefined}
 	                  dominantBaseline="auto"
 	                >
 	                  {top}
@@ -447,7 +450,8 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
 	                  fontFamily={cfg.text.fontFamily}
 	                  fontSize={bottomFontSize}
 	                  fontWeight={800}
-	                  textAnchor="middle"
+	                  textAnchor={bottomRotation ? "start" : "middle"}
+	                  transform={bottomRotation ? `rotate(${bottomRotation}, ${bottomX}, ${bottomY})` : undefined}
 	                  dominantBaseline="hanging"
                 >
                   {bottom}
@@ -459,13 +463,13 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
         {title ? (
           <text
             x={cfg.plotX + cfg.plotWidth + 10}
-            y={axisY - tickSize * 0.55}
+            y={axisY + tickSize * 0.5 + 4}
             fill={titleFill}
             fontFamily={cfg.text.fontFamily}
             fontSize={titleFontSize}
             fontWeight={900}
             textAnchor="start"
-            dominantBaseline="auto"
+            dominantBaseline="hanging"
           >
             {title}
           </text>
@@ -657,7 +661,7 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
     );
     if (!candidates.length) return null;
     const first = candidates[0];
-    const y1 = (first.track as unknown as { axis?: unknown })?.axis ? first.y + first.h * 0.5 : first.y;
+    const y1 = first.track.axis ? first.y + (first.track.axis.yOffset ?? first.h * 0.5) : first.y;
     const y2 = candidates[candidates.length - 1].y + candidates[candidates.length - 1].h;
 
     const xs =
@@ -692,6 +696,8 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
     if (!cfg.columns || cfg.columns < 2) return null;
     if (!cfg.columnGroups.length) return null;
     const boundaries = cfg.xBoundaries.length ? cfg.xBoundaries : Array.from({ length: cfg.columns + 1 }, (_, i) => i / cfg.columns);
+    const first = rows[0];
+    const boundaryYStart = first?.track.axis ? first.y + (first.track.axis.yOffset ?? first.h * 0.5) : plotYStart;
     return (
       <g>
         {cfg.columnGroups.map((g, idx) => {
@@ -705,7 +711,7 @@ export const GraphicalGenotypeSvg = forwardRef<SVGSVGElement, { config: GraphCon
               key={`${g.label}-${idx}`}
               x1={x1}
               x2={x1}
-              y1={plotYStart}
+              y1={boundaryYStart}
               y2={plotYEnd}
               stroke={stroke}
               strokeWidth={strokeWidth}

@@ -3135,14 +3135,27 @@ export const App: React.FC = () => {
     const fmtPos = (v: number): string => {
       const n = Number(v);
       if (!Number.isFinite(n)) return "";
-      const s = n.toFixed(n % 1 === 0 ? 0 : 2);
+      const s = n.toFixed(n % 1 === 0 ? 0 : 6);
       return s.replace(/(\.\d*?)0+$/g, "$1").replace(/\.$/g, "");
     };
     const figureFont = FIGURE_FONT;
     const measureText = createCanvasTextMeasurer(figureFont);
     const fitAxisHeights = (tracks: GraphTrack[], plotX: number, plotWidth: number): void => {
       for (const track of tracks) {
-        if (track.axis) track.height = getAxisTrackMetrics(track.axis, plotX, plotWidth, track.height ?? 64, 18, measureText).height;
+        if (!track.axis) continue;
+        const xs = track.axis.ticks.map((tick) => tick.x * plotWidth).sort((a, b) => a - b);
+        const minGap = Math.min(...xs.slice(1).map((x, index) => x - xs[index]));
+        const fontSize = track.axis.labelTopFontSize ?? 18;
+        const labelWidth = track.axis.ticks.reduce((sum, tick) => sum + measureText(tick.labelTop || "", fontSize, 800) + 8, 0);
+        if (labelWidth > plotWidth) {
+          track.axis.labelTopRotation = minGap >= fontSize * 1.7 ? -60 : -90;
+        }
+        const bottomFontSize = track.axis.labelBottomFontSize ?? 17;
+        const bottomWidth = track.axis.ticks.reduce((sum, tick) => sum + measureText(tick.labelBottom || "", bottomFontSize, 800) + 8, 0);
+        if (bottomWidth > plotWidth) track.axis.labelBottomRotation = minGap >= bottomFontSize * 1.7 ? 60 : 90;
+        const metrics = getAxisTrackMetrics(track.axis, plotX, plotWidth, track.height ?? 64, 18, measureText);
+        track.height = metrics.height;
+        track.axis.yOffset = metrics.yOffset;
       }
     };
 
@@ -3290,7 +3303,7 @@ export const App: React.FC = () => {
         showColumnLines: opts.guides,
         segments: [],
 	        axis: {
-	          title: "",
+		          title: showCoarseAxis ? "" : unitTitle,
 	          stroke: textFill,
 	          strokeWidth: 2,
 	          tickSize: 22,
@@ -3344,8 +3357,8 @@ export const App: React.FC = () => {
 
       const coarseX0 = plotX + (coarseMarkers.length ? coarseTickX(0) : 0) * plotWidth;
       const coarseX1 = plotX + (coarseMarkers.length ? coarseTickX(coarseMarkers.length - 1) : 1) * plotWidth;
-      const coarseAxisY = (coarseBox?.y ?? plotY) + (coarseBox?.h ?? 66) * 0.5;
-      const detailAxisY = (detailBox?.y ?? plotY) + (detailBox?.h ?? 74) * 0.5;
+      const coarseAxisY = (coarseBox?.y ?? plotY) + (coarseAxisTrack.axis?.yOffset ?? (coarseBox?.h ?? 66) * 0.5);
+      const zoomTargetTop = (showCoarseAxis ? coarseBox?.y : detailBox?.y) ?? plotY;
 
       const coarseTicks = coarseMarkers.length
         ? coarseMarkers.map((m, i) => ({ pos: m.pos, x: coarseTickX(i) })).sort((a, b) => a.pos - b.pos)
@@ -3819,7 +3832,7 @@ export const App: React.FC = () => {
 					              x1: hx0,
 					              y1: (chrBox?.y ?? plotY) + (chrBox?.h ?? 26),
 					              x2: showCoarseAxis ? coarseX0 : detailX0,
-					              y2: showCoarseAxis ? coarseAxisY : detailAxisY,
+					              y2: zoomTargetTop - 8,
 					              stroke: guideStroke,
 					              strokeWidth: 2,
 					              lineCap: "round",
@@ -3831,7 +3844,7 @@ export const App: React.FC = () => {
 					              x1: hx1,
 					              y1: (chrBox?.y ?? plotY) + (chrBox?.h ?? 26),
 					              x2: showCoarseAxis ? coarseX1 : detailX1,
-					              y2: showCoarseAxis ? coarseAxisY : detailAxisY,
+					              y2: zoomTargetTop - 8,
 					              stroke: guideStroke,
 					              strokeWidth: 2,
 					              lineCap: "round",
@@ -3844,9 +3857,9 @@ export const App: React.FC = () => {
 				                  {
 					                    kind: "line",
 					                    x1: coarseZoomX0,
-					                    y1: coarseAxisY,
+					                    y1: (coarseBox?.y ?? plotY) + (coarseBox?.h ?? 66),
 					                    x2: detailX0,
-					                    y2: detailAxisY,
+					                    y2: (detailBox?.y ?? plotY) - 8,
 					                    stroke: guideStroke,
 					                    strokeWidth: 2,
 					                    lineCap: "round",
@@ -3856,9 +3869,9 @@ export const App: React.FC = () => {
 				                  {
 					                    kind: "line",
 					                    x1: coarseZoomX1,
-					                    y1: coarseAxisY,
+					                    y1: (coarseBox?.y ?? plotY) + (coarseBox?.h ?? 66),
 					                    x2: detailX1,
-					                    y2: detailAxisY,
+					                    y2: (detailBox?.y ?? plotY) - 8,
 					                    stroke: guideStroke,
 					                    strokeWidth: 2,
 					                    lineCap: "round",
@@ -4356,7 +4369,7 @@ export const App: React.FC = () => {
 		      const y0 = yCursor;
 	      const y1 = y0 + h;
 	      if (y >= y0 && y <= y1) {
-	        const axisY = y0 + h * 0.5;
+	        const axisY = y0 + (t.axis?.yOffset ?? h * 0.5);
 	        const isTop = y < axisY;
 	        const nearAxisLine = Math.abs(y - axisY) <= 14;
 
@@ -5298,7 +5311,7 @@ export const App: React.FC = () => {
     setBusy(true);
     try {
       const size = exportPrintSize
-        ? getPublicationDimensions({ widthMm: exportWidthMm, dpi: exportDpi, sourceWidth: config.width, sourceHeight: config.height })
+        ? getPublicationDimensions({ widthMm: exportWidthMm, dpi: exportFormat === "svg" ? 96 : exportDpi, sourceWidth: config.width, sourceHeight: config.height, vector: exportFormat === "svg" })
         : { width: exportWidth, height: exportLockRatio ? Math.round(exportWidth * config.height / config.width) : exportHeight };
       if (exportFormat === "svg") {
         await downloadSvg(svgRef.current, { baseName, ...size, widthMm: exportPrintSize ? exportWidthMm : undefined });
@@ -5323,12 +5336,12 @@ export const App: React.FC = () => {
   const exportSize = useMemo(() => {
     try {
       return exportPrintSize
-        ? getPublicationDimensions({ widthMm: exportWidthMm, dpi: exportDpi, sourceWidth: config.width, sourceHeight: config.height })
+        ? getPublicationDimensions({ widthMm: exportWidthMm, dpi: exportFormat === "svg" ? 96 : exportDpi, sourceWidth: config.width, sourceHeight: config.height, vector: exportFormat === "svg" })
         : { width: exportWidth, height: exportLockRatio ? Math.round(exportWidth * config.height / config.width) : exportHeight };
     } catch {
       return null;
     }
-  }, [exportPrintSize, exportWidthMm, exportDpi, config.width, config.height, exportWidth, exportHeight, exportLockRatio]);
+  }, [exportPrintSize, exportWidthMm, exportDpi, config.width, config.height, exportWidth, exportHeight, exportLockRatio, exportFormat]);
 
   const setPublicationExport = (): void => {
     setExportFormat("png");
@@ -8628,7 +8641,7 @@ export const App: React.FC = () => {
                       </label>
                       <label className="seq-label">
                         <span>解像度(dpi)</span>
-                        <input className="seq-input" type="number" min={72} max={2400} step={1} value={exportDpi} onChange={(e) => setExportDpi(Number(e.target.value))} />
+                        <input className="seq-input" type="number" disabled={exportFormat === "svg"} min={72} max={2400} step={1} value={exportDpi} onChange={(e) => setExportDpi(Number(e.target.value))} />
                       </label>
                     </div>
                   ) : (
@@ -8648,7 +8661,8 @@ export const App: React.FC = () => {
                     縦横比を固定
                   </label>
                   <div className="ggt-help" aria-live="polite">
-                    {exportSize ? `${exportSize.width} × ${exportSize.height} px${exportPrintSize ? ` / 幅 ${exportWidthMm} mm・${exportDpi} dpi` : ""}` : "印刷幅と解像度には有効な正の値を入力してください。"}
+                    {exportSize ? exportPrintSize && exportFormat === "svg" ? `幅 ${exportWidthMm} mm / SVG（解像度に依存しないベクター画像）`
+                      : `${exportSize.width} × ${exportSize.height} px${exportPrintSize ? ` / 幅 ${exportWidthMm} mm・${exportDpi} dpi` : ""}` : "印刷幅・解像度・図の大きさを確認してください。"}
                   </div>
                   {exportPrintSize && figureQuality ? <div className="ggt-help" aria-live="polite">
                     図チェック: 最小文字 {figureQuality.minFontPt.toFixed(1)} pt / 範囲外 {figureQuality.clipped} / 文字の重なり {figureQuality.overlaps}

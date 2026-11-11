@@ -15,16 +15,25 @@ export const inspectFigureQuality = (svg: SVGSVGElement, widthMm: number): Figur
     if (!matrix) return [];
     const bounds = node.getBBox();
     const transform = inverse.multiply(matrix);
-    const points = [[bounds.x, bounds.y], [bounds.x + bounds.width, bounds.y], [bounds.x, bounds.y + bounds.height], [bounds.x + bounds.width, bounds.y + bounds.height]]
+    const points = [[bounds.x, bounds.y], [bounds.x + bounds.width, bounds.y], [bounds.x + bounds.width, bounds.y + bounds.height], [bounds.x, bounds.y + bounds.height]]
       .map(([x, y]) => new DOMPoint(x, y).matrixTransform(transform));
     return [{ x0: Math.min(...points.map((point) => point.x)), x1: Math.max(...points.map((point) => point.x)),
-      y0: Math.min(...points.map((point) => point.y)), y1: Math.max(...points.map((point) => point.y)) }];
+      y0: Math.min(...points.map((point) => point.y)), y1: Math.max(...points.map((point) => point.y)), points }];
   });
   let overlaps = 0;
   for (let i = 0; i < boxes.length; i++) {
     for (let j = i + 1; j < boxes.length; j++) {
-      if (Math.min(boxes[i].x1, boxes[j].x1) - Math.max(boxes[i].x0, boxes[j].x0) > 1
-        && Math.min(boxes[i].y1, boxes[j].y1) - Math.max(boxes[i].y0, boxes[j].y0) > 1) overlaps++;
+      const polygons = [boxes[i].points, boxes[j].points];
+      const separated = polygons.some((polygon) => polygon.some((point, index) => {
+        const next = polygon[(index + 1) % polygon.length];
+        const length = Math.hypot(next.x - point.x, next.y - point.y);
+        if (!length) return false;
+        const axis = { x: -(next.y - point.y) / length, y: (next.x - point.x) / length };
+        const projections = polygons.map((points) => points.map((p) => p.x * axis.x + p.y * axis.y));
+        return Math.min(Math.max(...projections[0]), Math.max(...projections[1]))
+          - Math.max(Math.min(...projections[0]), Math.min(...projections[1])) <= 1;
+      }));
+      if (!separated) overlaps++;
     }
   }
   const minFont = Math.min(...nodes.map((node) => Number.parseFloat(getComputedStyle(node).fontSize)));

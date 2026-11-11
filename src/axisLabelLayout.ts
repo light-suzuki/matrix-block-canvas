@@ -60,12 +60,23 @@ export const getAxisTrackMetrics = (
   baseHeight: number,
   baseFontSize: number,
   measureW: MeasureTextWidth,
-): { top: AxisLabelPlan; bottom: AxisLabelPlan; tickSize: number; height: number } => {
+): { top: AxisLabelPlan; bottom: AxisLabelPlan; tickSize: number; height: number; yOffset: number } => {
   const topFontSize = axis.labelTopFontSize ?? Math.max(10, Math.round(baseFontSize * 0.75));
   const bottomFontSize = axis.labelBottomFontSize ?? Math.max(10, Math.round(baseFontSize * 0.7));
   const top = layoutAxisLabels(axis.ticks.map((t) => ({ x: t.x, label: t.labelTop })), plotX, plotWidth, topFontSize, measureW);
   const bottom = layoutAxisLabels(axis.ticks.map((t) => ({ x: t.x, label: t.labelBottom })), plotX, plotWidth, bottomFontSize, measureW);
   const tickSize = axis.tickSize ?? Math.max(10, Math.round(Math.min(baseHeight, 48) * 0.38));
-  const height = Math.max(baseHeight, 2 * Math.max(top.height, bottom.height) + tickSize + 12);
-  return { top, bottom, tickSize, height };
+  const rotation = Number.isFinite(axis.labelTopRotation) ? axis.labelTopRotation ?? 0 : 0;
+  if (rotation && top.labels.length) {
+    const maxWidth = Math.max(...axis.ticks.map((tick) => measureW(tick.labelTop?.trim() || "", topFontSize, 800)));
+    top.height = Math.ceil(maxWidth * Math.abs(Math.sin(rotation * Math.PI / 180)) + topFontSize * 1.5);
+  }
+  const bottomRotation = Number.isFinite(axis.labelBottomRotation) ? axis.labelBottomRotation ?? 0 : 0;
+  if (bottomRotation && bottom.labels.length) {
+    const maxWidth = Math.max(...axis.ticks.map((tick) => measureW(tick.labelBottom?.trim() || "", bottomFontSize, 800)));
+    bottom.height = Math.ceil(maxWidth * Math.abs(Math.sin(bottomRotation * Math.PI / 180)) + bottomFontSize * 1.5);
+  }
+  const height = Math.ceil(Math.max(baseHeight, top.height + bottom.height + tickSize + 16));
+  const yOffset = Math.ceil(top.height + tickSize / 2 + 8);
+  return { top, bottom, tickSize, height, yOffset };
 };
