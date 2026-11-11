@@ -3147,12 +3147,13 @@ export const App: React.FC = () => {
         const minGap = Math.min(...xs.slice(1).map((x, index) => x - xs[index]));
         const fontSize = track.axis.labelTopFontSize ?? 18;
         const labelWidth = track.axis.ticks.reduce((sum, tick) => sum + measureText(tick.labelTop || "", fontSize, 800) + 8, 0);
-        if (labelWidth > plotWidth) {
+        // Rotation needs enough room for the font height; otherwise retain lane packing.
+        if (labelWidth > plotWidth && minGap >= fontSize * 1.4) {
           track.axis.labelTopRotation = minGap >= fontSize * 1.7 ? -60 : -90;
         }
         const bottomFontSize = track.axis.labelBottomFontSize ?? 17;
         const bottomWidth = track.axis.ticks.reduce((sum, tick) => sum + measureText(tick.labelBottom || "", bottomFontSize, 800) + 8, 0);
-        if (bottomWidth > plotWidth) track.axis.labelBottomRotation = minGap >= bottomFontSize * 1.7 ? 60 : 90;
+        if (bottomWidth > plotWidth && minGap >= bottomFontSize * 1.4) track.axis.labelBottomRotation = minGap >= bottomFontSize * 1.7 ? 60 : 90;
         const metrics = getAxisTrackMetrics(track.axis, plotX, plotWidth, track.height ?? 64, 18, measureText);
         track.height = metrics.height;
         track.axis.yOffset = metrics.yOffset;

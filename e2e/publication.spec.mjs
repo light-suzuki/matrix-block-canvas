@@ -274,7 +274,7 @@ test('Builder project save and restore preserves all genotypes, missing values, 
   assertSameGeometry(await textGeometry(figure(page)), initial, 'restoring Builder project');
 });
 
-for (const markerCount of [3, 20]) {
+for (const markerCount of [3, 20, 50]) {
   test(`numeric-window publication preset keeps all ${markerCount} markers readable and missing values distinct`, async ({ page }, testInfo) => {
     const project = makeZoomProject(markerCount);
     await page.goto('/');
