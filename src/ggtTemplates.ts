@@ -1,3 +1,5 @@
+import { FIGURE_FONT, createCanvasTextMeasurer } from "./textMetrics";
+
 export type GraphSegment = {
   start: number;
   end: number;
@@ -26,6 +28,9 @@ export type GraphTrack = {
     labelBottomFill?: string;
     labelTopFontSize?: number;
     labelBottomFontSize?: number;
+    labelTopRotation?: number;
+    labelBottomRotation?: number;
+    yOffset?: number;
     title?: string;
     titleFill?: string;
     titleFontSize?: number;
@@ -186,6 +191,18 @@ export type PalettePreset = {
 };
 
 export const palettePresets: PalettePreset[] = [
+  {
+    id: "paper_blue_yellow",
+    name: "論文用 青・黄・白・灰",
+    description: "A=青 / B=黄 / H=白 / 未判定=灰（欠測を区別）",
+    colors: { A: "#8DB4E2", B: "#FFD966", H: "#FFFFFF", "-": "#D9D9D9", other: "#a78bfa" },
+    legend: [
+      { label: "A", fill: "#8DB4E2", stroke: "#4A6180", strokeWidth: 1 },
+      { label: "B", fill: "#FFD966", stroke: "#4A6180", strokeWidth: 1 },
+      { label: "H", fill: "#FFFFFF", stroke: "#4A6180", strokeWidth: 1 },
+      { label: "未判定", fill: "#D9D9D9", stroke: "#4A6180", strokeWidth: 1 },
+    ],
+  },
   {
     id: "cyan_yellow_white",
     name: "Cyan/Yellow/White",
@@ -1016,6 +1033,8 @@ export const makeConfigFromMatrix = (markersRaw: MarkerInfo[], rowsRaw: MatrixRo
   const plotYBase = columnGroups.length ? 110 : 92;
   const plotY = xAxis ? (columnGroups.length ? 150 : 132) : plotYBase;
   const width = 1600;
+  const measure = createCanvasTextMeasurer(FIGURE_FONT);
+  const plotX = Math.max(120, Math.ceil(Math.max(0, ...rowsSorted.map((row) => measure(row.sample, 16, 800))) + 32));
 
   const tracks: GraphTrack[] = rowsSorted.map((r) => ({
     id: r.sample,
@@ -1025,7 +1044,9 @@ export const makeConfigFromMatrix = (markersRaw: MarkerInfo[], rowsRaw: MatrixRo
   }));
 
   const baseName = opts?.baseName?.trim() || "genotype";
-  const height = Math.max(320, plotY + tracks.length * (rowHeight + rowGap) + 120);
+  const legendY = plotY + tracks.length * (rowHeight + rowGap) + 24;
+  const legendHeight = 20 + 38 + palette.legend.length * 27;
+  const height = Math.max(320, legendY + legendHeight + 24);
 
   return {
     width,
@@ -1044,7 +1065,8 @@ export const makeConfigFromMatrix = (markersRaw: MarkerInfo[], rowsRaw: MatrixRo
       : undefined,
     xAxis,
     legend: {
-      y: 16,
+      x: plotX,
+      y: legendY,
       title: baseName,
       fontSize: 14,
       textFill,
@@ -1053,7 +1075,7 @@ export const makeConfigFromMatrix = (markersRaw: MarkerInfo[], rowsRaw: MatrixRo
       borderWidth: 1,
       items: palette.legend,
     },
-    plot: { x: 120, y: plotY, annotationWidth: 340, rowHeight, rowGap },
+    plot: { x: plotX, y: plotY, annotationWidth: 340, rowHeight, rowGap },
     styles: {
       columnLine: {
         stroke: gridStroke,
@@ -1061,7 +1083,7 @@ export const makeConfigFromMatrix = (markersRaw: MarkerInfo[], rowsRaw: MatrixRo
         dash: "2 4",
         opacity: theme === "light" ? 0.22 : 0.65,
       },
-      text: { fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif', fontSize: 18, fill: textFill },
+      text: { fontFamily: FIGURE_FONT, fontSize: 18, fill: textFill },
       segment: { stroke: "none", strokeWidth: 0 },
     },
     tracks,
@@ -1123,7 +1145,16 @@ const applyTemplateLayout = (
       ? { ...t.rightText, fontSize: opts.fontSize }
       : { text: t.id, fontSize: opts.fontSize, fill: cfg.styles?.text?.fill },
   }));
-  const height = Math.max(320, plotY + tracks.length * (opts.rowHeight + opts.rowGap) + 120);
+  const tracksBottom = plotY + tracks.reduce((sum, track) => sum + track.height + (track.gapAfter ?? opts.rowGap), 0);
+  const legendY = tracksBottom + 24;
+  const legendFontSize = cfg.legend?.fontSize ?? Math.max(12, Math.round(opts.fontSize * 0.85));
+  const legendTitleSize = Math.max(legendFontSize, Math.round(legendFontSize * 1.05));
+  const legendItemHeight = Math.max(cfg.legend?.itemSize ?? 14, Math.ceil(legendFontSize * 1.35));
+  const legendHeight = cfg.legend ? (cfg.legend.padding ?? 10) * 2
+    + (cfg.legend.title?.trim() ? Math.ceil(legendTitleSize * 1.25) + 14 : 0)
+    + cfg.legend.items.length * legendItemHeight
+    + Math.max(0, cfg.legend.items.length - 1) * (cfg.legend.itemGap ?? 8) : 0;
+  const height = Math.max(320, cfg.legend ? legendY + legendHeight + 24 : tracksBottom + 120);
 
   const mergedStyles: GraphConfig["styles"] = {
     ...(cfg.styles || {}),
@@ -1136,6 +1167,7 @@ const applyTemplateLayout = (
     ...cfg,
     width,
     height,
+    legend: cfg.legend ? { ...cfg.legend, x: plotX, y: legendY } : undefined,
     plot: { ...(cfg.plot || {}), x: plotX, y: plotY, width: plotWidth, annotationWidth, rowHeight: opts.rowHeight, rowGap: opts.rowGap },
     styles: mergedStyles,
     tracks,
@@ -1504,7 +1536,7 @@ const paperSimpleLight: GraphConfig = (() => {
 
   return {
     width: 1000,
-    height: cy + 80,
+    height: cy + 160,
     background: "#ffffff",
     columns: 20,
     plot: { x: plotX, y: plotY, width: plotWidth, annotationWidth, rowHeight, rowGap },
